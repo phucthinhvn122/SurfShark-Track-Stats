@@ -1,0 +1,31 @@
+{
+  "name": "surfshark-platform",
+  "private": true,
+  "packageManager": "pnpm@9.0.0",
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "typecheck": "turbo typecheck",
+    "lint": "turbo lint",
+    "test": "turbo test",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:seed": "tsx scripts/seed.ts",
+    "db:generate": "prisma generate"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0",
+    "prisma": "^5.14.0"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.14.0",
+    "argon2": "^0.40.1"
+  },
+  "pnpm": {
+    "overrides": {
+      "ioredis": "5.10.1"
+    }
+  }
+}

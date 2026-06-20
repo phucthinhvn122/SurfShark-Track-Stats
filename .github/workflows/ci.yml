@@ -1,0 +1,60 @@
+name: CI/CD
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec prisma generate
+      - run: pnpm turbo typecheck lint test build
+        env:
+          # validated by the shared env schema; dummy values for build/typecheck
+          DATABASE_URL: postgresql://u:p@localhost:5432/db
+          DIRECT_URL: postgresql://u:p@localhost:5432/db
+          REDIS_URL: rediss://localhost:6379
+          JWT_SECRET: ${{ secrets.JWT_SECRET || 'ci-secret-min-32-chars-aaaaaaaaaaaa' }}
+          SESSION_ENC_KEY: ${{ secrets.SESSION_ENC_KEY || 'ci-enc-key-min-32-chars-bbbbbbbbbb' }}
+          WEB_ORIGIN: https://example.com
+
+  deploy:
+    needs: build-test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+
+      # 1) DB migrations (auto-migration)
+      - name: Migrate database
+        run: pnpm exec prisma migrate deploy
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+
+      # 2) Deploy API + worker (Render deploy hooks)
+      - name: Deploy API
+        run: curl -fsS -X POST "${{ secrets.RENDER_API_DEPLOY_HOOK }}"
+      - name: Deploy Worker
+        run: curl -fsS -X POST "${{ secrets.RENDER_WORKER_DEPLOY_HOOK }}"
+      # 3) Frontend auto-deploys via Vercel Git integration
+
+      # 4) Post-deploy health check (rollback signal on failure)
+      - name: Health check
+        run: |
+          sleep 30
+          curl -fsS "${{ secrets.API_URL }}/health" || (echo "Health check failed — investigate / rollback" && exit 1)

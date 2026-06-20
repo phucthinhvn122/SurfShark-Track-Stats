@@ -1,0 +1,23 @@
+{
+  "name": "@surfshark/telegram-worker",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "tsx watch src/worker.ts",
+    "start": "tsx src/worker.ts",
+    "session": "tsx src/generate-session.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.14.0",
+    "@sentry/node": "^8.0.0",
+    "@surfshark/shared": "workspace:*",
+    "bullmq": "^5.7.0",
+    "ioredis": "^5.4.0",
+    "telegram": "^2.22.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0"
+  }
+}

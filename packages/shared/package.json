@@ -1,0 +1,13 @@
+{
+  "name": "@surfshark/shared",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "test": "node --import tsx --test test/schema.spec.ts"
+  },
+  "dependencies": { "zod": "^3.23.0" },
+  "devDependencies": { "tsx": "^4.7.0", "typescript": "^5.4.0" }
+}

@@ -1,0 +1,106 @@
+// prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")       // Supabase pooled connection
+  directUrl = env("DIRECT_URL")         // direct connection for migrations
+}
+
+enum LicenseStatus {
+  unused
+  active
+  expired
+  banned
+}
+
+enum ActivationResult {
+  pending
+  success
+  failed
+}
+
+model License {
+  id          String        @id @default(cuid())
+  licenseKey  String        @unique @map("license_key")
+  username    String?
+  status      LicenseStatus @default(unused)
+  notes       String?
+  createdAt   DateTime      @default(now()) @map("created_at")
+  activatedAt DateTime?     @map("activated_at")
+  expiredAt   DateTime?     @map("expired_at")
+
+  activations Activation[]
+
+  @@index([status])
+  @@index([expiredAt])
+  @@index([username])
+  @@map("licenses")
+}
+
+model Activation {
+  id         String           @id @default(cuid())
+  licenseId  String           @map("license_id")
+  license    License          @relation(fields: [licenseId], references: [id], onDelete: Cascade)
+  requestId  String           @unique @map("request_id")
+  username   String
+  ipAddress  String?          @map("ip_address")
+  country    String?
+  device     String?
+  result     ActivationResult @default(pending)
+  createdAt  DateTime         @default(now()) @map("created_at")
+
+  @@index([licenseId])
+  @@index([createdAt])
+  @@index([result, createdAt]) // dashboard "today" + failed counts
+  @@map("activations")
+}
+
+model TelegramLog {
+  id        String   @id @default(cuid())
+  action    String
+  request   String?
+  response  String?
+  status    String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@map("telegram_logs")
+}
+
+model Admin {
+  id           String    @id @default(cuid())
+  username     String    @unique
+  passwordHash String    @map("password_hash")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  auditLogs    AuditLog[]
+
+  @@map("admins")
+}
+
+model Settings {
+  id              Int      @id @default(1)
+  telegramSession String?  @map("telegram_session")   // AES-GCM encrypted at rest
+  botUsername     String   @default("@SurfsharkBot") @map("bot_username")
+  durationDays    Int      @default(30) @map("duration_days")
+  rateLimitPerMin Int      @default(5)  @map("rate_limit_per_min")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("settings")
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  adminId   String   @map("admin_id")
+  admin     Admin    @relation(fields: [adminId], references: [id])
+  action    String
+  target    String?
+  ipAddress String?  @map("ip_address")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([adminId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
