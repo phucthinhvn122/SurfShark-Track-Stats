@@ -4,6 +4,7 @@
   "scripts": {
     "dev": "tsx watch src/worker.ts",
     "start": "tsx src/worker.ts",
+    "start:prod": "node dist/worker.js",
     "session": "tsx src/generate-session.ts",
     "typecheck": "tsc --noEmit",
     "build": "tsc"
