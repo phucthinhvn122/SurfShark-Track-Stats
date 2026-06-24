@@ -52,7 +52,7 @@ Log in with the phone/code/2FA prompts. Copy the printed StringSession → `TG_S
 
 ## 6. CI/CD — GitHub Actions
 `.github/workflows/ci.yml` already runs on PRs (typecheck/lint/test/build) and on `main` (migrate → trigger Render deploy hooks → health check). Add repo secrets:
-`DATABASE_URL`, `DIRECT_URL`, `RENDER_API_DEPLOY_HOOK`, `RENDER_WORKER_DEPLOY_HOOK`, `API_URL`, `JWT_SECRET`, `SESSION_ENC_KEY`.
+`DATABASE_URL`, `DIRECT_URL`, `RENDER_DEPLOY_HOOK`, `API_URL`, `JWT_SECRET`, `SESSION_ENC_KEY`.
 (Vercel auto-deploys via its own Git integration.)
 
 ---

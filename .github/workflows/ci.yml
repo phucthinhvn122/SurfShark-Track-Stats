@@ -46,11 +46,9 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
 
-      # 2) Deploy API + worker (Render deploy hooks)
-      - name: Deploy API
-        run: curl -fsS -X POST "${{ secrets.RENDER_API_DEPLOY_HOOK }}"
-      - name: Deploy Worker
-        run: curl -fsS -X POST "${{ secrets.RENDER_WORKER_DEPLOY_HOOK }}"
+      # 2) Deploy combined API + worker (single Render service via render.yaml)
+      - name: Deploy Render
+        run: curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"
       # 3) Frontend auto-deploys via Vercel Git integration
 
       # 4) Post-deploy health check (rollback signal on failure)

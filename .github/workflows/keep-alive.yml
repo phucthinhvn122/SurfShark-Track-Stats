@@ -1,0 +1,20 @@
+# Keep Render free tier warm (spins down after 15 min idle).
+# Also keeps Supabase active (pauses after 1 week inactivity).
+name: Keep Alive
+
+on:
+  schedule:
+    - cron: "*/10 * * * *" # every 10 minutes
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping API health
+        run: |
+          if [ -z "${{ secrets.API_URL }}" ]; then
+            echo "API_URL secret not set — skip"
+            exit 0
+          fi
+          curl -fsS "${{ secrets.API_URL }}/health" && echo " OK"

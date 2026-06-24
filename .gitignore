@@ -27,3 +27,5 @@ coverage/
 
 # non-project snapshots
 .snapshots/
+
+.vercel
