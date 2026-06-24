@@ -15,7 +15,9 @@
     "railway:build:api": "pnpm exec prisma generate && pnpm --filter @surfshark/api build",
     "railway:start:api": "pnpm --filter @surfshark/api start",
     "railway:build:worker": "pnpm exec prisma generate && pnpm --filter @surfshark/telegram-worker build",
-    "railway:start:worker": "pnpm --filter @surfshark/telegram-worker start:prod"
+    "railway:start:worker": "pnpm --filter @surfshark/telegram-worker start:prod",
+    "render:build": "pnpm exec prisma generate && pnpm build",
+    "render:start": "node scripts/start-combined.js"
   },
   "devDependencies": {
     "turbo": "^2.0.0",

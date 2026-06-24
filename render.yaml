@@ -1,13 +1,13 @@
-# render.yaml — Render Blueprint (API web service + Telegram worker)
+# render.yaml — Render Blueprint (Combined Web Service + Worker)
 # Deploy: Render Dashboard → New → Blueprint → point at this repo.
 services:
   - type: web
-    name: surfshark-api
+    name: surfshark-combined
     runtime: node
     region: singapore
-    plan: starter
-    buildCommand: pnpm install --frozen-lockfile && pnpm exec prisma generate && pnpm --filter @surfshark/api build
-    startCommand: pnpm --filter @surfshark/api start
+    plan: free
+    buildCommand: pnpm render:build
+    startCommand: pnpm render:start
     preDeployCommand: pnpm exec prisma migrate deploy
     healthCheckPath: /health
     autoDeploy: true
@@ -30,20 +30,6 @@ services:
         value: "info"
       - key: PORT
         value: "3001"
-
-  - type: worker
-    name: surfshark-telegram-worker
-    runtime: node
-    region: singapore
-    plan: starter
-    buildCommand: pnpm install --frozen-lockfile && pnpm exec prisma generate
-    startCommand: pnpm --filter @surfshark/telegram-worker start
-    autoDeploy: true
-    envVars:
-      - key: DATABASE_URL
-        sync: false
-      - key: REDIS_URL
-        sync: false
       - key: TG_API_ID
         sync: false
       - key: TG_API_HASH
@@ -52,12 +38,7 @@ services:
         sync: false
       - key: TG_SESSIONS
         sync: false
-      - key: SENTRY_DSN
-        sync: false
       - key: BOT_USERNAME
         value: "@SurfsharkBot"
       - key: WORKER_CONCURRENCY
         value: "5"
-
-# Release command (runs migrations on each deploy) — set in service settings:
-#   pnpm exec prisma migrate deploy
