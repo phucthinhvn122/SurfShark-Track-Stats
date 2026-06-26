@@ -6,7 +6,7 @@ services:
     runtime: node
     region: singapore
     plan: free
-    buildCommand: pnpm render:build && pnpm exec prisma migrate deploy
+    buildCommand: pnpm install --frozen-lockfile --prod=false && pnpm render:build && pnpm exec prisma migrate deploy
     startCommand: pnpm render:start
     healthCheckPath: /health
     autoDeploy: true
