@@ -6,7 +6,7 @@ services:
     runtime: node
     region: singapore
     plan: free
-    buildCommand: pnpm render:build && pnpm exec prisma migrate deploy
+    buildCommand: pnpm render:build
     startCommand: pnpm render:start
     healthCheckPath: /health
     autoDeploy: true
