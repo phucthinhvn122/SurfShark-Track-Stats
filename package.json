@@ -19,15 +19,15 @@
     "render:build": "pnpm exec prisma generate && pnpm build",
     "render:start": "node scripts/start-combined.js"
   },
-  "devDependencies": {
+    "devDependencies": {
     "turbo": "^2.0.0",
     "tsx": "^4.7.0",
-    "typescript": "^5.4.0",
-    "prisma": "^5.14.0"
+    "typescript": "^5.4.0"
   },
-  "dependencies": {
+    "dependencies": {
     "@prisma/client": "^5.14.0",
-    "argon2": "^0.40.1"
+    "argon2": "^0.40.1",
+    "prisma": "^5.14.0"
   },
   "pnpm": {
     "overrides": {
