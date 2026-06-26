@@ -5,8 +5,8 @@ generator client {
 
 datasource db {
   provider  = "postgresql"
-  url       = env("DATABASE_URL")       // Supabase pooled connection
-  directUrl = env("DIRECT_URL")         // direct connection for migrations
+  url       = env("DATABASE_URL")       // Runtime connection, usually Supabase session pooler.
+  directUrl = env("DIRECT_URL")         // Migration URL; use direct only when IPv6 works.
 }
 
 enum LicenseStatus {

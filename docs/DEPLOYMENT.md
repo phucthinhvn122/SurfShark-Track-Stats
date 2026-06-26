@@ -13,10 +13,13 @@ Deploy targets: **Vercel** (web) · **Render** (API + Telegram worker) · **Supa
 
 ## 1. Database — Supabase
 1. Create a project → **Project Settings → Database**.
-2. Copy two connection strings:
-   - **Pooled** (port `6543`, `?pgbouncer=true`) → `DATABASE_URL`
-   - **Direct** (port `5432`) → `DIRECT_URL`
-3. Run migrations + seed locally (or via CI):
+2. Copy the pooler connection string:
+   - **Connection pooling / Session mode** (port `5432`) -> `DATABASE_URL`
+   - Use the same session-pooler string for `DIRECT_URL` if your machine/CI cannot reach the IPv6-only direct host.
+   - Optional for serverless clients only: **Transaction mode** (port `6543`, `?pgbouncer=true`).
+3. If Supabase rejects the login with `P1000`, reset the database password in Supabase and copy a fresh connection string. Make sure the password is URL-encoded.
+4. If Prisma fails with `P1001` against `db.<project-ref>.supabase.co:5432`, your network likely cannot reach Supabase's direct IPv6 host; use the session-pooler host instead.
+5. Run migrations + seed locally (or via CI):
    ```bash
    pnpm exec prisma migrate deploy
    pnpm db:seed   # creates admin / admin123 + demo keys

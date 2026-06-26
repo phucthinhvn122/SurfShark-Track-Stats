@@ -2,7 +2,7 @@
 import * as Sentry from '@sentry/node';
 import { NestFactory } from '@nestjs/core';
 import helmet from 'helmet';
-import { ValidationPipe, INestApplication } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { z } from 'zod';
@@ -50,7 +50,7 @@ async function bootstrap() {
   );
   // Bearer-token auth (no cookies) → credentials not needed; smaller CORS surface.
   app.enableCors({ origin: env.WEB_ORIGIN, methods: ['GET', 'POST', 'PATCH', 'DELETE'], credentials: false });
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }));
+
   app.enableShutdownHooks(); // drain Prisma/Redis on SIGTERM (Render redeploys)
 
   await app.listen(Number(env.PORT));

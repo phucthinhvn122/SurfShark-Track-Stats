@@ -14,8 +14,10 @@ Write-Host @"
   1. Mở https://supabase.com/dashboard → New Project (Free)
   2. Region: Singapore (gần Render)
   3. Project Settings → Database → Connection string:
-     - Transaction pooler (6543) → DATABASE_URL
-     - Direct (5432) → DIRECT_URL
+     - Connection pooling / Session mode (5432) -> DATABASE_URL
+     - Use the same session-pooler URL for DIRECT_URL when direct IPv6 is unavailable
+     - Transaction mode (6543, ?pgbouncer=true) is mainly for serverless clients
+     - If Prisma returns P1000, reset/copy the DB password again and URL-encode it
   4. Chạy migration:
      `$env:DATABASE_URL='...'; `$env:DIRECT_URL='...'; pnpm exec prisma migrate deploy
      pnpm db:seed
