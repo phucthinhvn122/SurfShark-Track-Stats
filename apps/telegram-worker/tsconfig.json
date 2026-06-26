@@ -8,8 +8,8 @@
     "skipLibCheck": true,
     "strict": true,
     "outDir": "./dist",
-    "resolveJsonModule": true,
-    "paths": { "@surfshark/shared": ["../../packages/shared/src/index.ts"] }
+    "rootDir": "./src",
+    "resolveJsonModule": true
   },
   "include": ["src/**/*"]
 }
