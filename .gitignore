@@ -28,4 +28,6 @@ coverage/
 # non-project snapshots
 .snapshots/
 
+# turbo / vercel cache
+.turbo/
 .vercel

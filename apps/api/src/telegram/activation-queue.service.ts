@@ -7,6 +7,7 @@ import { REDIS } from '../common/redis.module';
 export interface ActivationJob {
   requestId: string;
   deviceCode: string;
+  licenseKey: string;
 }
 
 /**

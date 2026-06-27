@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto';
 import { PrismaService } from '../common/prisma.service';
 import { ActivationQueueService } from '../telegram/activation-queue.service';
 import { StatusStore } from './status.store';
+import { LicenseService } from '../license/license.service';
 import { AppException } from '../common/app-exception';
 import { ErrorCode, type DeviceLoginInput, type StatusResponse } from '@surfshark/shared';
 
@@ -11,6 +12,7 @@ import { ErrorCode, type DeviceLoginInput, type StatusResponse } from '@surfshar
 export class ActivationService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly licenses: LicenseService,
     private readonly queue: ActivationQueueService,
     private readonly status: StatusStore,
   ) {}
@@ -21,22 +23,20 @@ export class ActivationService {
    */
   async activate(input: DeviceLoginInput, meta: { ip?: string; ua?: string; country?: string }) {
     const requestId = `req_${randomUUID()}`;
-    await this.prisma.activation.create({
-      data: {
-        requestId,
-        deviceCode: input.deviceCode,
-        licenseId: null,
-        username: null,
-        ipAddress: meta.ip,
-        country: meta.country,
-        device: meta.ua,
-        sessionMeta: { ip: meta.ip, country: meta.country, ua: meta.ua },
-        result: 'pending',
-      },
+    const sessionMeta = Object.fromEntries(
+      Object.entries({ ip: meta.ip, country: meta.country, ua: meta.ua }).filter(([, v]) => v != null),
+    );
+    await this.licenses.reserveActivation(input.license, {
+      requestId,
+      deviceCode: input.deviceCode,
+      ipAddress: meta.ip,
+      country: meta.country,
+      device: meta.ua,
+      sessionMeta,
     });
 
     await this.status.set(requestId, { state: 'processing' });
-    await this.queue.enqueue({ requestId, deviceCode: input.deviceCode });
+    await this.queue.enqueue({ requestId, deviceCode: input.deviceCode, licenseKey: input.license });
 
     return { requestId, state: 'processing' as const };
   }
@@ -49,7 +49,12 @@ export class ActivationService {
     // fallback to DB if cache expired
     const act = await this.prisma.activation.findUnique({
       where: { requestId },
-      select: { deviceCode: true, result: true, createdAt: true },
+      select: {
+        deviceCode: true,
+        result: true,
+        createdAt: true,
+        license: { select: { licenseKey: true, durationDays: true, activatedAt: true, expiredAt: true } },
+      },
     });
     if (!act) throw new AppException(ErrorCode.KEY_NOT_FOUND, 'Request not found', HttpStatus.NOT_FOUND);
 
@@ -60,7 +65,10 @@ export class ActivationService {
     return {
       state: 'success',
       deviceCode: act.deviceCode ?? undefined,
-      activatedAt: act.createdAt.toISOString(),
+      licenseKey: act.license?.licenseKey,
+      durationDays: act.license?.durationDays,
+      activatedAt: act.license?.activatedAt?.toISOString() ?? act.createdAt.toISOString(),
+      expiredAt: act.license?.expiredAt?.toISOString(),
     };
   }
 }

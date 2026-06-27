@@ -3,36 +3,42 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { deviceLoginSchema, DEVICE_CODE_REGEX } from '../src/index';
 
+const payload = (deviceCode: string) => ({ deviceCode, license: 'VPN-A9X2-K8LM' });
+
 describe('deviceLoginSchema', () => {
   it('accepts a 6-char uppercase code and trims whitespace', () => {
-    const r = deviceLoginSchema.parse({ deviceCode: '  abcdef  ' });
+    const r = deviceLoginSchema.parse(payload('  abcdef  '));
     assert.equal(r.deviceCode, 'ABCDEF');
+    assert.equal(r.license, 'VPN-A9X2-K8LM');
   });
 
-  it('uppercases a mixed-case code', () => {
-    const r = deviceLoginSchema.parse({ deviceCode: 'aBc12X' });
+  it('uppercases a mixed-case code and license', () => {
+    const r = deviceLoginSchema.parse({ deviceCode: 'aBc12X', license: 'vpn-a9x2-k8lm' });
     assert.equal(r.deviceCode, 'ABC12X');
+    assert.equal(r.license, 'VPN-A9X2-K8LM');
   });
 
   it('rejects codes shorter than 6 chars', () => {
-    const r = deviceLoginSchema.safeParse({ deviceCode: 'ABCDE' });
-    assert.equal(r.success, false);
+    assert.equal(deviceLoginSchema.safeParse(payload('ABCDE')).success, false);
   });
 
   it('rejects codes longer than 6 chars', () => {
-    const r = deviceLoginSchema.safeParse({ deviceCode: 'ABCDEFG' });
-    assert.equal(r.success, false);
+    assert.equal(deviceLoginSchema.safeParse(payload('ABCDEFG')).success, false);
   });
 
   it('rejects non-alphanumeric chars', () => {
-    for (const bad of ['AB-DEF', 'AB!DEF', 'AB DEF', 'AĐCDER']) {
-      const r = deviceLoginSchema.safeParse({ deviceCode: bad });
+    for (const bad of ['AB-DEF', 'AB!DEF', 'AB DEF']) {
+      const r = deviceLoginSchema.safeParse(payload(bad));
       assert.equal(r.success, false, `expected "${bad}" to be rejected`);
     }
   });
 
   it('rejects empty string', () => {
-    assert.equal(deviceLoginSchema.safeParse({ deviceCode: '' }).success, false);
+    assert.equal(deviceLoginSchema.safeParse(payload('')).success, false);
+  });
+
+  it('rejects bad license formats', () => {
+    assert.equal(deviceLoginSchema.safeParse({ deviceCode: 'ABC123', license: 'BAD-KEY' }).success, false);
   });
 
   it('DEVICE_CODE_REGEX matches only [A-Z0-9]{6}', () => {

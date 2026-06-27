@@ -63,7 +63,7 @@ export class QueriesService {
   /** Export all licenses as a CSV string. */
   async exportCsv(): Promise<string> {
     const rows = await this.prisma.license.findMany({ orderBy: { createdAt: 'desc' } });
-    const head = 'license_key,username,status,created_at,activated_at,expired_at,notes';
+    const head = 'license_key,username,status,duration_days,created_at,activated_at,expired_at,notes';
     const esc = (v: unknown) => {
       const s = v == null ? '' : String(v);
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -74,6 +74,7 @@ export class QueriesService {
           l.licenseKey,
           l.username ?? '',
           l.status,
+          l.durationDays,
           l.createdAt.toISOString(),
           l.activatedAt?.toISOString() ?? '',
           l.expiredAt?.toISOString() ?? '',

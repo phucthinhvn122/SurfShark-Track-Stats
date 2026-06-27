@@ -24,9 +24,9 @@ async function main() {
   // demo keys
   await prisma.license.createMany({
     data: [
-      { licenseKey: 'VPN-A9X2-K8LM', status: 'unused' },
-      { licenseKey: 'VPN-7H3K-M2QP', status: 'unused' },
-      { licenseKey: 'VPN-DEAD-BEEF', status: 'banned' },
+      { licenseKey: 'VPN-A9X2-K8LM', status: 'unused', durationDays: 30 },
+      { licenseKey: 'VPN-7H3K-M2QP', status: 'unused', durationDays: 7 },
+      { licenseKey: 'VPN-DEAD-BEEF', status: 'banned', durationDays: 30 },
     ],
     skipDuplicates: true,
   });

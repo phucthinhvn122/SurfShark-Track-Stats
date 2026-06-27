@@ -1,0 +1,1 @@
+ALTER TABLE "licenses" ADD COLUMN "duration_days" INTEGER NOT NULL DEFAULT 30;

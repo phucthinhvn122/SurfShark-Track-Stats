@@ -21,6 +21,7 @@ describe('LicenseService — state machine', () => {
       licenseKey: 'VPN-A9X2-K8LM',
       username: null,
       status: 'unused',
+      durationDays: 30,
       activatedAt: null,
       expiredAt: null,
       ...over,
@@ -29,21 +30,21 @@ describe('LicenseService — state machine', () => {
 
   it('rejects a non-existent key', async () => {
     jest.spyOn(svc, 'findByKey').mockResolvedValue(null);
-    await expect(svc.assertActivatable('VPN-XXXX-XXXX', 'thinh')).rejects.toBeInstanceOf(AppException);
+    await expect(svc.assertActivatable('VPN-XXXX-XXXX')).rejects.toBeInstanceOf(AppException);
   });
 
   it('rejects a banned key', async () => {
     jest.spyOn(svc, 'findByKey').mockResolvedValue(license({ status: 'banned' }) as any);
-    await expect(svc.assertActivatable('VPN-A9X2-K8LM', 'thinh')).rejects.toMatchObject({
+    await expect(svc.assertActivatable('VPN-A9X2-K8LM')).rejects.toMatchObject({
       response: { error: { code: 'ERR_KEY_BANNED' } },
     });
   });
 
-  it('rejects a key bound to another user', async () => {
+  it('rejects an already-used key', async () => {
     jest.spyOn(svc, 'findByKey').mockResolvedValue(
       license({ status: 'active', username: 'lan', expiredAt: new Date(Date.now() + 1e9) }) as any,
     );
-    await expect(svc.assertActivatable('VPN-A9X2-K8LM', 'thinh')).rejects.toMatchObject({
+    await expect(svc.assertActivatable('VPN-A9X2-K8LM')).rejects.toMatchObject({
       response: { error: { code: 'ERR_KEY_IN_USE' } },
     });
   });
@@ -51,12 +52,6 @@ describe('LicenseService — state machine', () => {
   it('allows an unused key', async () => {
     const l = license();
     jest.spyOn(svc, 'findByKey').mockResolvedValue(l as any);
-    await expect(svc.assertActivatable('VPN-A9X2-K8LM', 'thinh')).resolves.toEqual(l);
-  });
-
-  it('allows the same user to re-activate an active key', async () => {
-    const l = license({ status: 'active', username: 'thinh', expiredAt: new Date(Date.now() + 1e9) });
-    jest.spyOn(svc, 'findByKey').mockResolvedValue(l as any);
-    await expect(svc.assertActivatable('VPN-A9X2-K8LM', 'thinh')).resolves.toEqual(l);
+    await expect(svc.assertActivatable('VPN-A9X2-K8LM')).resolves.toEqual(l);
   });
 });

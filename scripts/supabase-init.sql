@@ -17,11 +17,14 @@ END$$;
 -- Tables
 CREATE TABLE IF NOT EXISTS "licenses" (
     "id" TEXT NOT NULL, "license_key" TEXT NOT NULL, "username" TEXT,
-    "status" "LicenseStatus" NOT NULL DEFAULT 'unused', "notes" TEXT,
+    "status" "LicenseStatus" NOT NULL DEFAULT 'unused',
+    "duration_days" INTEGER NOT NULL DEFAULT 30, "notes" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "activated_at" TIMESTAMP(3), "expired_at" TIMESTAMP(3),
     CONSTRAINT "licenses_pkey" PRIMARY KEY ("id")
 );
+
+ALTER TABLE "licenses" ADD COLUMN IF NOT EXISTS "duration_days" INTEGER NOT NULL DEFAULT 30;
 
 CREATE TABLE IF NOT EXISTS "activations" (
     "id" TEXT NOT NULL, "license_id" TEXT, "request_id" TEXT NOT NULL,
@@ -100,9 +103,9 @@ SELECT 1, '@SurfsharkBot', 30, 5
 WHERE NOT EXISTS (SELECT 1 FROM "settings" WHERE id = 1);
 
 -- Demo keys (skip if exists)
-INSERT INTO "licenses" ("id", "license_key", "status")
-SELECT gen_random_uuid()::text, k.key, k.st
-FROM (VALUES ('VPN-A9X2-K8LM', 'unused'::"LicenseStatus"), ('VPN-7H3K-M2QP', 'unused'), ('VPN-DEAD-BEEF', 'banned')) AS k(key, st)
+INSERT INTO "licenses" ("id", "license_key", "status", "duration_days")
+SELECT gen_random_uuid()::text, k.key, k.st, k.days
+FROM (VALUES ('VPN-A9X2-K8LM', 'unused'::"LicenseStatus", 30), ('VPN-7H3K-M2QP', 'unused', 7), ('VPN-DEAD-BEEF', 'banned', 30)) AS k(key, st, days)
 WHERE NOT EXISTS (SELECT 1 FROM "licenses" WHERE license_key = k.key);
 
 -- Prisma migration table

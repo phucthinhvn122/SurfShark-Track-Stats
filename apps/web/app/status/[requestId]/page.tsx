@@ -55,7 +55,9 @@ export default function StatusPage({ params }: { params: Promise<{ requestId: st
         </div>
         <div className="mt-6 grid grid-cols-2 gap-px bg-white/10 rounded-xl overflow-hidden border border-white/10">
           <Cell label="Device code" value={maskCode(data.deviceCode)} />
-          <Cell label="Logged in at" value={fmt(data.activatedAt)} />
+          <Cell label="License key" value={maskKey(data.licenseKey)} />
+          <Cell label="Plan" value={planLabel(data.durationDays)} />
+          <Cell label="Expires" value={fmt(data.expiredAt)} />
         </div>
         <Link href="/" className="btn-primary w-full mt-6">Done</Link>
       </motion.div>
@@ -73,6 +75,17 @@ function Cell({ label, value }: { label: string; value?: string }) {
 }
 function fmt(iso?: string) {
   return iso ? new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+}
+function maskKey(key?: string) {
+  if (!key || key.length < 8) return key ?? '-';
+  return `${key.slice(0, 7)}***${key.slice(-4)}`;
+}
+function planLabel(days?: number) {
+  if (days === 0) return 'One time';
+  if (days === 7) return '7 days';
+  if (days === 30) return '30 days';
+  if (days === 365) return '1 year';
+  return days ? `${days} days` : '-';
 }
 function maskCode(code?: string) {
   if (!code || code.length < 4) return code ?? '—';

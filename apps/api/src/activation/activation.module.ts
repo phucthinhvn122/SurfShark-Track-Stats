@@ -4,8 +4,10 @@ import { ActivationController } from './activation.controller';
 import { ActivationService } from './activation.service';
 import { StatusStore } from './status.store';
 import { ActivationQueueService } from '../telegram/activation-queue.service';
+import { LicenseModule } from '../license/license.module';
 
 @Module({
+  imports: [LicenseModule],
   controllers: [ActivationController],
   providers: [ActivationService, StatusStore, ActivationQueueService],
 })

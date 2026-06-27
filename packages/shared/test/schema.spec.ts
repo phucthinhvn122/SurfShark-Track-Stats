@@ -1,7 +1,7 @@
 // packages/shared/test/schema.spec.ts
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { activateSchema, LICENSE_REGEX } from '../src/index';
+import { activateSchema, bulkCreateSchema, LICENSE_REGEX } from '../src/index';
 
 describe('activateSchema', () => {
   it('accepts a valid payload and uppercases the key', () => {
@@ -21,5 +21,23 @@ describe('activateSchema', () => {
     assert.equal(LICENSE_REGEX.test('VPN-A9X2-K8LM'), true);
     assert.equal(LICENSE_REGEX.test('VPN-a9x2-k8lm'), false);
     assert.equal(LICENSE_REGEX.test('VPN-A9X2K8LM'), false);
+  });
+});
+
+describe('bulkCreateSchema', () => {
+  it('accepts supported key durations', () => {
+    for (const durationDays of [0, 7, 30, 365]) {
+      const r = bulkCreateSchema.parse({ count: 1, durationDays });
+      assert.equal(r.durationDays, durationDays);
+    }
+  });
+
+  it('defaults generated keys to 30 days', () => {
+    const r = bulkCreateSchema.parse({ count: 1 });
+    assert.equal(r.durationDays, 30);
+  });
+
+  it('rejects unsupported key durations', () => {
+    assert.equal(bulkCreateSchema.safeParse({ count: 1, durationDays: 14 }).success, false);
   });
 });

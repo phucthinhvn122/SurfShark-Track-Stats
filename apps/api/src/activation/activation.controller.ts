@@ -11,8 +11,8 @@ export class ActivationController {
   constructor(private readonly service: ActivationService) {}
 
   /**
-   * POST /login — 5 req/min/IP. Accepts a 6-character device code; the worker
-   * sends `/login <code>` to the Surfshark bot. Returns 202 with a requestId.
+   * POST /login - 5 req/min/IP. Requires a DB-backed license key and a
+   * 6-character device code; the worker sends `/login <code>` to Surfshark.
    */
   @Post('login')
   @HttpCode(202)
@@ -28,7 +28,7 @@ export class ActivationController {
     return { success: true, data };
   }
 
-  /** GET /status/:requestId — 30 req/min/IP. Polled by the frontend. */
+  /** GET /status/:requestId - 30 req/min/IP. Polled by the frontend. */
   @Get('status/:requestId')
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   async status(@Param('requestId') requestId: string) {

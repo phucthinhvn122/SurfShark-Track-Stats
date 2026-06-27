@@ -6,7 +6,7 @@ import { api } from '../lib/api';
 /** /login trigger: submit a 6-character device code, returns requestId. */
 export function useLogin() {
   return useMutation({
-    mutationFn: (v: { deviceCode: string }) => api.login(v.deviceCode),
+    mutationFn: (v: { deviceCode: string; license: string }) => api.login(v.deviceCode, v.license),
   });
 }
 

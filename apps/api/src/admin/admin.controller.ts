@@ -38,8 +38,8 @@ export class AdminController {
   @UseGuards(JwtAuthGuard)
   @Post('keys/bulk-create')
   @UsePipes(new ZodValidationPipe(bulkCreateSchema))
-  bulkCreate(@Body() b: { count: number; notes?: string }, @Req() r: any) {
-    return this.admin.bulkCreate(b.count, b.notes, r.user.sub, clientIp(r));
+  bulkCreate(@Body() b: { count: number; durationDays: number; notes?: string }, @Req() r: any) {
+    return this.admin.bulkCreate(b.count, b.durationDays, b.notes, r.user.sub, clientIp(r));
   }
 
   @UseGuards(JwtAuthGuard)

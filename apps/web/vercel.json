@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "cd ../.. && pnpm exec prisma generate && pnpm --filter @surfshark/web build",
+  "buildCommand": "cd ../.. && pnpm exec prisma generate && pnpm --filter @surfshark/shared build && pnpm --filter @surfshark/web build",
   "installCommand": "cd ../.. && pnpm install --frozen-lockfile --prod=false",
   "framework": "nextjs",
   "outputDirectory": ".next",

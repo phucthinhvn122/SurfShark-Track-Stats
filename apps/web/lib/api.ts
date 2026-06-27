@@ -17,10 +17,10 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  login: (deviceCode: string) =>
+  login: (deviceCode: string, license: string) =>
     req<{ requestId: string; state: 'processing' }>('/login', {
       method: 'POST',
-      body: JSON.stringify({ deviceCode }),
+      body: JSON.stringify({ deviceCode, license }),
     }),
   // legacy: license-key activation (kept for backward compatibility)
   activate: (username: string, license: string) =>
@@ -45,8 +45,8 @@ export const api = {
       getSettings: () => req<any>('/admin/settings', { headers: auth }),
       updateSettings: (patch: Record<string, unknown>) =>
         req<any>('/admin/settings', { method: 'PATCH', headers: auth, body: JSON.stringify(patch) }),
-      bulkCreate: (count: number) =>
-        req<any>('/admin/keys/bulk-create', { method: 'POST', headers: auth, body: JSON.stringify({ count }) }),
+      bulkCreate: (count: number, durationDays = 30) =>
+        req<any>('/admin/keys/bulk-create', { method: 'POST', headers: auth, body: JSON.stringify({ count, durationDays }) }),
       keyAction: (action: 'ban' | 'unban' | 'extend', licenseKey: string) =>
         req<any>(`/admin/keys/${action}`, { method: 'PATCH', headers: auth, body: JSON.stringify({ licenseKey }) }),
       remove: (licenseKey: string) =>
