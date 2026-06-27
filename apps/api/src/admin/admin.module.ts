@@ -7,13 +7,16 @@ import { QueriesService } from './queries.service';
 import { SettingsService } from './settings.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { LicenseModule } from '../license/license.module';
+import { loadEnv } from '../config/env.config';
 
 @Module({
   imports: [
     LicenseModule,
-    JwtModule.register({
-      secret: process.env.JWT_SECRET,
-      signOptions: { expiresIn: '8h' },
+    JwtModule.registerAsync({
+      useFactory: () => ({
+        secret: loadEnv().JWT_SECRET,
+        signOptions: { expiresIn: '8h' },
+      }),
     }),
   ],
   controllers: [AdminController],

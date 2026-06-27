@@ -9,12 +9,15 @@ import type { Redis } from 'ioredis';
 import { PrismaModule } from './common/prisma.module';
 import { RedisModule, REDIS } from './common/redis.module';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
+import { ConfigModule } from './config/config.module';
 import { ActivationModule } from './activation/activation.module';
 import { AdminModule } from './admin/admin.module';
 import { HealthModule } from './health/health.module';
+import { KeyRedeemModule } from './key-redeem/key-redeem.module';
 
 @Module({
   imports: [
+    ConfigModule, // validates env on boot, exposes typed config via ENV token
     PrismaModule, // global single Prisma connection
     RedisModule, // global single Redis connection
     ScheduleModule.forRoot(), // enables @Cron (expiry sweep)
@@ -37,6 +40,7 @@ import { HealthModule } from './health/health.module';
     }),
     ActivationModule,
     AdminModule,
+    KeyRedeemModule,
     HealthModule,
   ],
   providers: [

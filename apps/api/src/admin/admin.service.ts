@@ -13,6 +13,7 @@ const MAX_FAILS = 10;
 const LOCK_TTL = 15 * 60; // seconds
 const JWT_ISS = 'surfshark-activation';
 const JWT_AUD = 'surfshark-admin';
+const JWT_TTL_SECONDS = 28_800; // 8h
 
 @Injectable()
 export class AdminService {
@@ -56,7 +57,7 @@ export class AdminService {
       { sub: admin.id, username },
       { expiresIn: '8h', issuer: JWT_ISS, audience: JWT_AUD },
     );
-    return { accessToken, expiresIn: 28_800 };
+    return { accessToken, expiresIn: JWT_TTL_SECONDS };
   }
 
   async dashboard() {
@@ -76,9 +77,9 @@ export class AdminService {
     return { success: true, data: { total, active, unused, expired, banned, totalLogins, todayLogins, failedLogins } };
   }
 
-  async bulkCreate(count: number, notes: string | undefined, adminId: string, ip?: string) {
-    const keys = await this.licenses.bulkCreate(count, notes);
-    await this.audit(adminId, 'bulk_create', `${count} keys`, ip);
+  async bulkCreate(count: number, durationDays: number, notes: string | undefined, adminId: string, ip?: string) {
+    const keys = await this.licenses.bulkCreate(count, durationDays, notes);
+    await this.audit(adminId, 'bulk_create', `${count} keys (${durationDays}d)`, ip);
     return { success: true, data: { generated: keys.length, keys } };
   }
 

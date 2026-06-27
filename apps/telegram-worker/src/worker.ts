@@ -24,6 +24,7 @@ import { SessionPool } from './session-pool';
 
 const HEARTBEAT_KEY = 'worker:heartbeat';
 const SESSIONS_KEY = 'worker:sessions';
+const DAY = 86_400_000;
 
 if (process.env.SENTRY_DSN) {
   Sentry.init({ dsn: process.env.SENTRY_DSN, tracesSampleRate: 0.1, environment: process.env.NODE_ENV });
@@ -36,6 +37,7 @@ const dlq = new Queue('activation-dlq', { connection });
 interface ActivationJob {
   requestId: string;
   deviceCode: string;
+  licenseKey: string;
 }
 
 const apiId = Number(process.env.TG_API_ID);
@@ -44,7 +46,7 @@ const botUsername = process.env.BOT_USERNAME || '@SurfsharkBot';
 
 let pool: SessionPool;
 
-/** AES-256-GCM decrypt — matches the API's settings encryption. */
+/** AES-256-GCM decrypt — must match the API's settings encryption. */
 function decryptSession(payload: string): string {
   const key = scryptSync(process.env.SESSION_ENC_KEY!, 'surfshark-salt', 32);
   const [ivH, tagH, dataH] = payload.split(':');
@@ -54,6 +56,16 @@ function decryptSession(payload: string): string {
 }
 
 const maybeDecrypt = (s: string) => (s.split(':').length === 3 ? decryptSession(s) : s);
+
+function maskKey(k: string, visible = 4): string {
+  if (k.length <= visible * 2) return '*'.repeat(k.length);
+  return `${k.slice(0, visible)}${'*'.repeat(k.length - visible * 2)}${k.slice(-visible)}`;
+}
+
+function maskDeviceCode(c: string): string {
+  if (c.length <= 4) return '*'.repeat(c.length);
+  return `${c.slice(0, 2)}${'*'.repeat(c.length - 4)}${c.slice(-2)}`;
+}
 
 /**
  * Resolve the session strings for the pool, in priority order:
@@ -90,9 +102,29 @@ async function writeStatus(requestId: string, status: StatusResponse) {
   await connection.set(`status:${requestId}`, JSON.stringify(status), 'EX', 3600);
 }
 
+async function commitLicenseActivation(licenseKey: string) {
+  return prisma.$transaction(async (tx) => {
+    const locked = await tx.$queryRaw<Array<{ id: string; status: string; duration_days: number }>>`
+      SELECT id, status, duration_days FROM licenses WHERE license_key = ${licenseKey} FOR UPDATE`;
+    const row = locked[0];
+    if (!row) throw new Error('ERR_KEY_NOT_FOUND');
+    if (row.status === 'banned') throw new Error('ERR_KEY_BANNED');
+    if (row.status === 'expired') throw new Error('ERR_KEY_EXPIRED');
+    if (row.status === 'active') throw new Error('ERR_KEY_IN_USE');
+
+    const activatedAt = new Date();
+    const expiredAt = new Date(activatedAt.getTime() + row.duration_days * DAY);
+    const status = row.duration_days === 0 ? 'expired' : 'active';
+    return tx.license.update({
+      where: { licenseKey },
+      data: { status, activatedAt, expiredAt },
+    });
+  });
+}
+
 // ---------- the job processor ----------
 async function processJob(job: Job<ActivationJob>) {
-  const { requestId, deviceCode } = job.data;
+  const { requestId, deviceCode, licenseKey } = job.data;
 
   // Idempotency — FIX (audit): a retry/duplicate must not re-commit. Skip if the
   // activation already reached a terminal state.
@@ -102,7 +134,9 @@ async function processJob(job: Job<ActivationJob>) {
   }
 
   const command = `/login ${deviceCode}`;
-  await prisma.telegramLog.create({ data: { action: 'login', request: command, status: 'sent' } });
+  // Persist masked command so DB logs never contain the raw device code.
+  const maskedCommand = `/login ${maskDeviceCode(deviceCode)}`;
+  await prisma.telegramLog.create({ data: { action: 'login', request: maskedCommand, status: 'sent' } });
 
   let replyText: string;
   let sessionId: number;
@@ -119,7 +153,7 @@ async function processJob(job: Job<ActivationJob>) {
   }
 
   await prisma.telegramLog.create({
-    data: { action: 'login', request: command, response: `[s${sessionId}] ${replyText}`, status: 'received' },
+    data: { action: 'login', request: maskedCommand, response: `[s${sessionId}] ${replyText}`, status: 'received' },
   });
 
   const parsed = parseReply(replyText);
@@ -134,11 +168,26 @@ async function processJob(job: Job<ActivationJob>) {
     return;
   }
 
-  await prisma.activation.update({ where: { requestId }, data: { result: 'success' } });
+  let license;
+  try {
+    license = await commitLicenseActivation(licenseKey);
+  } catch (err: any) {
+    await prisma.activation.update({ where: { requestId }, data: { result: 'failed' } });
+    await writeStatus(requestId, {
+      state: 'failed',
+      error: { code: err.message || 'ERR_KEY_IN_USE', message: 'License key is no longer available' },
+    });
+    return;
+  }
+
+  await prisma.activation.update({ where: { requestId }, data: { result: 'success', licenseId: license.id } });
   await writeStatus(requestId, {
     state: 'success',
     deviceCode,
-    activatedAt: new Date().toISOString(),
+    licenseKey: license.licenseKey,
+    durationDays: license.durationDays,
+    activatedAt: license.activatedAt?.toISOString(),
+    expiredAt: license.expiredAt?.toISOString(),
   });
 }
 

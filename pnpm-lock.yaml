@@ -78,6 +78,9 @@ importers:
       pino-http:
         specifier: ^10.1.0
         version: 10.5.0
+      telegram:
+        specifier: ^2.26.22
+        version: 2.26.22
       zod:
         specifier: ^3.23.0
         version: 3.25.76
