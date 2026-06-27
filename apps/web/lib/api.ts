@@ -17,6 +17,12 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  login: (deviceCode: string) =>
+    req<{ requestId: string; state: 'processing' }>('/login', {
+      method: 'POST',
+      body: JSON.stringify({ deviceCode }),
+    }),
+  // legacy: license-key activation (kept for backward compatibility)
   activate: (username: string, license: string) =>
     req<{ requestId: string; state: 'processing' }>('/activate', {
       method: 'POST',

@@ -17,11 +17,11 @@ export default function Landing() {
           <br /> in seconds — no signup.
         </h1>
         <p className="mt-6 text-lg text-muted">
-          No account. No login. Enter your username and license key — our server-side automation
-          handles the rest through a secure Telegram session.
+          No account. No login. Enter the 6-character code from your device — our server-side
+          automation handles the rest through a secure Telegram session.
         </p>
         <div className="mt-8 flex gap-3 justify-center flex-wrap">
-          <Link href="/activate" className="btn-primary">Activate now →</Link>
+          <Link href="/login" className="btn-primary">Login with code →</Link>
         </div>
       </section>
 

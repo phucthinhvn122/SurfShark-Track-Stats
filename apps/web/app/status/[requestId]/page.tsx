@@ -6,7 +6,7 @@ import { motion } from 'framer-motion';
 import { CheckCircle2, XCircle } from 'lucide-react';
 import { useStatus } from '../../../hooks/queries';
 
-const STEPS = ['Validating license key', 'Queuing activation job', 'Sending command to Surfshark Bot', 'Parsing bot response', 'Finalizing'];
+const STEPS = ['Validating device code', 'Queuing login job', 'Sending /login command to Surfshark Bot', 'Parsing bot response', 'Finalizing'];
 
 export default function StatusPage({ params }: { params: Promise<{ requestId: string }> }) {
   const { requestId } = use(params);
@@ -33,11 +33,11 @@ export default function StatusPage({ params }: { params: Promise<{ requestId: st
       <main className="max-w-md mx-auto px-6 py-20 text-center">
         <div className="glass p-10">
           <XCircle className="mx-auto text-red-400" size={56} />
-          <h2 className="mt-4 text-2xl font-extrabold">Activation failed</h2>
+          <h2 className="mt-4 text-2xl font-extrabold">Login failed</h2>
           <p className="text-muted mt-2">{data.error?.message ?? 'Something went wrong.'}</p>
           {data.error?.code && <code className="inline-block mt-3 text-xs bg-white/5 px-2 py-1 rounded">{data.error.code}</code>}
           <div className="mt-6 flex gap-3">
-            <Link href="/activate" className="btn-primary flex-1">Try again</Link>
+            <Link href="/login" className="btn-primary flex-1">Try again</Link>
             <Link href="/" className="btn-ghost flex-1">Home</Link>
           </div>
         </div>
@@ -54,16 +54,8 @@ export default function StatusPage({ params }: { params: Promise<{ requestId: st
           <h2 className="mt-3 text-2xl font-extrabold">You're protected</h2>
         </div>
         <div className="mt-6 grid grid-cols-2 gap-px bg-white/10 rounded-xl overflow-hidden border border-white/10">
-          <Cell label="Username" value={data.username} />
-          <Cell label="License key" value={data.license} />
-          <Cell label="Activated at" value={fmt(data.activatedAt)} />
-          <Cell label="Expires at" value={fmt(data.expiredAt)} />
-          <div className="col-span-2 bg-surface p-4">
-            <div className="text-xs text-muted">Remaining</div>
-            <b className="text-3xl bg-gradient-to-r from-secondary to-violet-500 bg-clip-text text-transparent">
-              {data.remainingDays} days
-            </b>
-          </div>
+          <Cell label="Device code" value={maskCode(data.deviceCode)} />
+          <Cell label="Logged in at" value={fmt(data.activatedAt)} />
         </div>
         <Link href="/" className="btn-primary w-full mt-6">Done</Link>
       </motion.div>
@@ -75,10 +67,14 @@ function Cell({ label, value }: { label: string; value?: string }) {
   return (
     <div className="bg-surface p-4">
       <div className="text-xs text-muted">{label}</div>
-      <b className="text-base break-all">{value ?? '—'}</b>
+      <b className="text-base break-all font-mono">{value ?? '—'}</b>
     </div>
   );
 }
 function fmt(iso?: string) {
   return iso ? new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+}
+function maskCode(code?: string) {
+  if (!code || code.length < 4) return code ?? '—';
+  return `${code.slice(0, 2)}**${code.slice(-2)}`;
 }

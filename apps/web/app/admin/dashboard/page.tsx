@@ -16,20 +16,36 @@ export default function Dashboard() {
 
   if (!data) return <main className="p-10 text-muted">Loading…</main>;
 
-  const cards = [
+  const licenseCards = [
     ['Total keys', data.total], ['Active', data.active], ['Unused', data.unused],
-    ['Expired', data.expired], ['Banned', data.banned], ['Total activations', data.totalActivations],
-    ["Today's activations", data.todayActivations], ['Failed activations', data.failed],
+    ['Expired', data.expired], ['Banned', data.banned],
+  ];
+  const loginCards = [
+    ['Total logins', data.totalLogins],
+    ["Today's logins", data.todayLogins],
+    ['Failed logins', data.failedLogins],
   ];
 
   return (
     <main className="max-w-6xl mx-auto px-6 py-10">
       <h1 className="text-3xl font-black mb-6">Dashboard</h1>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        {cards.map(([label, val]) => (
-          <div key={label as string} className="glass p-5">
-            <div className="text-sm text-muted">{label}</div>
-            <div className="text-3xl font-extrabold mt-1">{val}</div>
+
+      <h2 className="text-sm uppercase tracking-widest text-muted mb-3">Licenses</h2>
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-8">
+        {licenseCards.map(([label, val]) => (
+          <div key={label as string} className="glass p-4">
+            <div className="text-xs text-muted">{label}</div>
+            <div className="text-2xl font-extrabold mt-1">{val}</div>
+          </div>
+        ))}
+      </div>
+
+      <h2 className="text-sm uppercase tracking-widest text-muted mb-3">Device-code logins</h2>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        {loginCards.map(([label, val]) => (
+          <div key={label as string} className="glass p-4">
+            <div className="text-xs text-muted">{label}</div>
+            <div className="text-2xl font-extrabold mt-1">{val}</div>
           </div>
         ))}
       </div>
