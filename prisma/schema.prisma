@@ -42,10 +42,12 @@ model License {
 
 model Activation {
   id         String           @id @default(cuid())
-  licenseId  String           @map("license_id")
-  license    License          @relation(fields: [licenseId], references: [id], onDelete: Cascade)
+  licenseId  String?          @map("license_id")
+  license    License?         @relation(fields: [licenseId], references: [id], onDelete: SetNull)
   requestId  String           @unique @map("request_id")
-  username   String
+  username   String?
+  deviceCode String?          @map("device_code")
+  sessionMeta Json?           @map("session_meta")
   ipAddress  String?          @map("ip_address")
   country    String?
   device     String?
@@ -55,6 +57,7 @@ model Activation {
   @@index([licenseId])
   @@index([createdAt])
   @@index([result, createdAt]) // dashboard "today" + failed counts
+  @@index([deviceCode])       // device-code login history lookup
   @@map("activations")
 }
 

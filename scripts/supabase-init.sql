@@ -24,8 +24,9 @@ CREATE TABLE IF NOT EXISTS "licenses" (
 );
 
 CREATE TABLE IF NOT EXISTS "activations" (
-    "id" TEXT NOT NULL, "license_id" TEXT NOT NULL, "request_id" TEXT NOT NULL,
-    "username" TEXT NOT NULL, "ip_address" TEXT, "country" TEXT, "device" TEXT,
+    "id" TEXT NOT NULL, "license_id" TEXT, "request_id" TEXT NOT NULL,
+    "username" TEXT, "device_code" TEXT, "session_meta" JSONB,
+    "ip_address" TEXT, "country" TEXT, "device" TEXT,
     "result" "ActivationResult" NOT NULL DEFAULT 'pending',
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "activations_pkey" PRIMARY KEY ("id")
@@ -69,6 +70,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS "activations_request_id_key" ON "activations"(
 CREATE INDEX IF NOT EXISTS "activations_license_id_idx" ON "activations"("license_id");
 CREATE INDEX IF NOT EXISTS "activations_created_at_idx" ON "activations"("created_at");
 CREATE INDEX IF NOT EXISTS "activations_result_created_at_idx" ON "activations"("result", "created_at");
+CREATE INDEX IF NOT EXISTS "activations_device_code_idx" ON "activations"("device_code");
+CREATE INDEX IF NOT EXISTS "activations_created_at_result_idx" ON "activations"("created_at","result");
 CREATE INDEX IF NOT EXISTS "telegram_logs_created_at_idx" ON "telegram_logs"("created_at");
 CREATE UNIQUE INDEX IF NOT EXISTS "admins_username_key" ON "admins"("username");
 CREATE INDEX IF NOT EXISTS "audit_logs_admin_id_idx" ON "audit_logs"("admin_id");
@@ -78,7 +81,7 @@ CREATE INDEX IF NOT EXISTS "audit_logs_created_at_idx" ON "audit_logs"("created_
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'activations_license_id_fkey') THEN
-        ALTER TABLE "activations" ADD CONSTRAINT "activations_license_id_fkey" FOREIGN KEY ("license_id") REFERENCES "licenses"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+        ALTER TABLE "activations" ADD CONSTRAINT "activations_license_id_fkey" FOREIGN KEY ("license_id") REFERENCES "licenses"("id") ON DELETE SET NULL ON UPDATE CASCADE;
     END IF;
     IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'audit_logs_admin_id_fkey') THEN
         ALTER TABLE "audit_logs" ADD CONSTRAINT "audit_logs_admin_id_fkey" FOREIGN KEY ("admin_id") REFERENCES "admins"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
