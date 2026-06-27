@@ -21,7 +21,7 @@ const envSchema = z.object({
   TG_API_ID: z.coerce.number().int().positive().optional(),
   TG_API_HASH: z.string().min(1).optional(),
   TG_SESSION: z.string().min(1).optional(),
-  BOT_USERNAME: z.string().min(1).default('@SurfsharkBot'),
+  BOT_USERNAME: z.string().min(1).default('@Vpnssfree_bot'),
 
   // Optional — where to fetch the device code from.
   SURFSHARK_DEVICE_CODE_FILE: z.string().optional(),

@@ -42,7 +42,7 @@ interface ActivationJob {
 
 const apiId = Number(process.env.TG_API_ID);
 const apiHash = process.env.TG_API_HASH!;
-const botUsername = process.env.BOT_USERNAME || '@SurfsharkBot';
+const botUsername = process.env.BOT_USERNAME || '@Vpnssfree_bot';
 
 let pool: SessionPool;
 

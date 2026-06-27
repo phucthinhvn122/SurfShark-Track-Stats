@@ -6,7 +6,7 @@ import type { SettingsUpdateInput } from '@surfshark/shared';
 
 const SETTINGS_ID = 1;
 const MASKED_SESSION_PLACEHOLDER = '••••••••••••••••';
-const DEFAULT_BOT = '@SurfsharkBot';
+const DEFAULT_BOT = '@Vpnssfree_bot';
 const DEFAULT_DURATION_DAYS = 30;
 const DEFAULT_RATE_LIMIT = 5;
 
