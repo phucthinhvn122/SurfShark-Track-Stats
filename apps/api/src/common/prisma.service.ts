@@ -10,7 +10,21 @@ import { PrismaClient } from '@prisma/client';
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   async onModuleInit() {
-    await this.$connect();
+    try {
+      await this.$connect();
+    } catch (err: any) {
+      const url = process.env.DATABASE_URL ?? '';
+      let masked = '<unset>';
+      try {
+        const u = new URL(url);
+        masked = `${u.protocol}//${u.username}:***@${u.host}${u.pathname}`;
+      } catch {
+        masked = '<invalid DATABASE_URL>';
+      }
+      // eslint-disable-next-line no-console
+      console.error(`[PrismaService] $connect failed — DATABASE_URL=${masked} — ${err?.message ?? err}`);
+      throw err;
+    }
   }
 
   async onModuleDestroy() {
