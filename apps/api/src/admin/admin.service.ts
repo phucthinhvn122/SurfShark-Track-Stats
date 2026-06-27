@@ -62,7 +62,7 @@ export class AdminService {
   async dashboard() {
     // ensure expired keys are reflected before counting
     await this.licenses.markExpired();
-    const [total, active, unused, expired, banned, totalActivations, todayActivations, failed] =
+    const [total, active, unused, expired, banned, totalLogins, todayLogins, failedLogins] =
       await Promise.all([
         this.prisma.license.count(),
         this.prisma.license.count({ where: { status: 'active' } }),
@@ -73,7 +73,7 @@ export class AdminService {
         this.prisma.activation.count({ where: { result: 'success', createdAt: { gte: new Date(Date.now() - 86_400_000) } } }),
         this.prisma.activation.count({ where: { result: 'failed' } }),
       ]);
-    return { success: true, data: { total, active, unused, expired, banned, totalActivations, todayActivations, failed } };
+    return { success: true, data: { total, active, unused, expired, banned, totalLogins, todayLogins, failedLogins } };
   }
 
   async bulkCreate(count: number, notes: string | undefined, adminId: string, ip?: string) {

@@ -3,7 +3,9 @@
 import { z } from 'zod';
 
 export const LICENSE_REGEX = /^VPN-[A-Z0-9]{4}-[A-Z0-9]{4}$/;
+export const DEVICE_CODE_REGEX = /^[A-Z0-9]{6}$/;
 
+/** Legacy license-key activation (kept for admin-side license management). */
 export const activateSchema = z.object({
   username: z
     .string()
@@ -18,6 +20,20 @@ export const activateSchema = z.object({
     .pipe(z.string().regex(LICENSE_REGEX, 'Invalid format. Use VPN-XXXX-XXXX')),
 });
 export type ActivateInput = z.infer<typeof activateSchema>;
+
+/** Public /login endpoint — 6-character device code (A–Z, 0–9). */
+export const deviceLoginSchema = z.object({
+  deviceCode: z
+    .string()
+    .trim()
+    .min(6)
+    .max(6)
+    .transform((s) => s.toUpperCase())
+    .pipe(
+      z.string().regex(DEVICE_CODE_REGEX, 'Device code must be 6 uppercase letters/digits'),
+    ),
+});
+export type DeviceLoginInput = z.infer<typeof deviceLoginSchema>;
 
 export const adminLoginSchema = z.object({
   username: z.string().min(1),
@@ -47,11 +63,8 @@ export type ActivationState = 'processing' | 'success' | 'failed';
 
 export interface StatusResponse {
   state: ActivationState;
-  username?: string;
-  license?: string;
+  deviceCode?: string;
   activatedAt?: string;
-  expiredAt?: string;
-  remainingDays?: number;
   error?: { code: string; message: string };
 }
 

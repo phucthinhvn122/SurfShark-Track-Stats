@@ -8,6 +8,11 @@
 // - Idempotent: jobs already in a terminal state are skipped (no double-commit).
 // - Handles FloodWait, timeout, session failover, DLQ, heartbeat, graceful stop.
 //
+// Device-code login flow: each job carries a 6-char deviceCode; the worker
+// sends `/login <deviceCode>` to the Surfshark bot and writes the outcome
+// back to the activations row. No license-key transaction is performed —
+// device-code logins are stateless.
+//
 import * as Sentry from '@sentry/node';
 import { Worker, Queue, Job } from 'bullmq';
 import IORedis from 'ioredis';
@@ -17,8 +22,6 @@ import { createDecipheriv, scryptSync } from 'crypto';
 import type { StatusResponse } from '@surfshark/shared';
 import { SessionPool } from './session-pool';
 
-const DAY = 86_400_000;
-const REPLY_TIMEOUT_MS = 25_000;
 const HEARTBEAT_KEY = 'worker:heartbeat';
 const SESSIONS_KEY = 'worker:sessions';
 
@@ -32,8 +35,7 @@ const dlq = new Queue('activation-dlq', { connection });
 
 interface ActivationJob {
   requestId: string;
-  licenseKey: string;
-  username: string;
+  deviceCode: string;
 }
 
 const apiId = Number(process.env.TG_API_ID);
@@ -75,10 +77,10 @@ async function resolveSessions(): Promise<string[]> {
 // ---------- parse the bot reply into a structured result ----------
 function parseReply(text: string): { ok: boolean; reason?: string } {
   const t = text.toLowerCase();
-  if (/✅|activated|success|valid/.test(t)) return { ok: true };
+  if (/✅|activated|logged in|success|valid|welcome/.test(t)) return { ok: true };
   if (/banned|blocked/.test(t)) return { ok: false, reason: 'banned' };
   if (/expired/.test(t)) return { ok: false, reason: 'expired' };
-  if (/invalid|not found|unknown/.test(t)) return { ok: false, reason: 'invalid' };
+  if (/invalid|not found|unknown|wrong/.test(t)) return { ok: false, reason: 'invalid' };
   // unexpected format → alert (parser drift) and treat as retryable failure
   Sentry.captureMessage(`Unexpected bot reply: ${text.slice(0, 200)}`, 'warning');
   return { ok: false, reason: 'unexpected' };
@@ -90,7 +92,7 @@ async function writeStatus(requestId: string, status: StatusResponse) {
 
 // ---------- the job processor ----------
 async function processJob(job: Job<ActivationJob>) {
-  const { requestId, licenseKey, username } = job.data;
+  const { requestId, deviceCode } = job.data;
 
   // Idempotency — FIX (audit): a retry/duplicate must not re-commit. Skip if the
   // activation already reached a terminal state.
@@ -99,8 +101,8 @@ async function processJob(job: Job<ActivationJob>) {
     return;
   }
 
-  const command = `/activate ${username} ${licenseKey}`;
-  await prisma.telegramLog.create({ data: { action: 'activate', request: command, status: 'sent' } });
+  const command = `/login ${deviceCode}`;
+  await prisma.telegramLog.create({ data: { action: 'login', request: command, status: 'sent' } });
 
   let replyText: string;
   let sessionId: number;
@@ -117,7 +119,7 @@ async function processJob(job: Job<ActivationJob>) {
   }
 
   await prisma.telegramLog.create({
-    data: { action: 'activate', request: command, response: `[s${sessionId}] ${replyText}`, status: 'received' },
+    data: { action: 'login', request: command, response: `[s${sessionId}] ${replyText}`, status: 'received' },
   });
 
   const parsed = parseReply(replyText);
@@ -132,29 +134,11 @@ async function processJob(job: Job<ActivationJob>) {
     return;
   }
 
-  // commit success atomically with a row lock (race-safe)
-  const settings = await prisma.settings.findFirst();
-  const duration = settings?.durationDays ?? 30;
-  const license = await prisma.$transaction(async (tx) => {
-    const locked = await tx.$queryRaw<Array<{ status: string }>>`
-      SELECT status FROM licenses WHERE license_key = ${licenseKey} FOR UPDATE`;
-    if (locked[0]?.status === 'unused') {
-      const activatedAt = new Date();
-      const expiredAt = new Date(activatedAt.getTime() + duration * DAY);
-      return tx.license.update({ where: { licenseKey }, data: { username, status: 'active', activatedAt, expiredAt } });
-    }
-    return tx.license.findUniqueOrThrow({ where: { licenseKey } });
-  });
   await prisma.activation.update({ where: { requestId }, data: { result: 'success' } });
-
-  const exp = license.expiredAt!;
   await writeStatus(requestId, {
     state: 'success',
-    username,
-    license: licenseKey,
-    activatedAt: license.activatedAt?.toISOString(),
-    expiredAt: exp.toISOString(),
-    remainingDays: Math.max(0, Math.ceil((exp.getTime() - Date.now()) / DAY)),
+    deviceCode,
+    activatedAt: new Date().toISOString(),
   });
 }
 
@@ -170,7 +154,7 @@ async function main() {
   const sessions = await resolveSessions();
   if (sessions.length === 0) throw new Error('No Telegram sessions configured (TG_SESSIONS / TG_SESSION / DB)');
 
-  pool = new SessionPool(apiId, apiHash, botUsername, sessions, REPLY_TIMEOUT_MS);
+  pool = new SessionPool(apiId, apiHash, botUsername, sessions);
   await pool.init();
   if (pool.healthyCount === 0) {
     console.error('WARNING: no healthy Telegram sessions — activations will fail until rotated.');

@@ -32,7 +32,7 @@ export class QueriesService {
     const [rows, total] = await Promise.all([
       this.prisma.activation.findMany({
         where: { result: 'success' },
-        include: { license: true },
+        include: { license: { select: { licenseKey: true, status: true, expiredAt: true } } },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
@@ -43,14 +43,15 @@ export class QueriesService {
       success: true,
       data: {
         rows: rows.map((a) => ({
-          username: a.username,
-          key: a.license.licenseKey,
-          activatedAt: a.license.activatedAt,
-          expiredAt: a.license.expiredAt,
-          status: a.license.status,
+          kind: a.deviceCode ? 'device' : 'license',
+          deviceCode: a.deviceCode ?? null,
+          licenseKey: a.license?.licenseKey ?? null,
+          status: a.license?.status ?? null,
+          expiredAt: a.license?.expiredAt ?? null,
           ip: a.ipAddress,
           country: a.country,
           device: a.device,
+          activatedAt: a.createdAt,
         })),
         total,
         page,
