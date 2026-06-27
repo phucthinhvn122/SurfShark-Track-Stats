@@ -1,6 +1,6 @@
 # Surfshark VPN Activation Platform
 
-Production-ready starter monorepo. Users activate a Surfshark VPN license with **no signup / no login** — just username + license key. The website is a gateway to a **server-side Telegram automation service**; users never touch the bot.
+Production-ready starter monorepo. Users activate a Surfshark VPN device with **no signup / no login** — just a 6-character device code (e.g. `ABCDEF`). The website is a gateway to a **server-side Telegram automation service**; users never touch the bot.
 
 ```
 User → Next.js (Vercel) → NestJS API (Render) → BullMQ/Redis (Upstash)
@@ -31,9 +31,10 @@ docker-compose.yml                ← local Postgres + Redis
 
 apps/web/                         ← Next.js 15 frontend (real code)
   app/page.tsx                    ← landing (Server Component, SEO)
-  app/activate/page.tsx           ← RHF + Zod activation form
+  app/login/page.tsx              ← RHF + Zod device-code form
+  app/activate/page.tsx           ← legacy alias (permanentRedirect → /login)
   app/status/[requestId]/page.tsx ← React Query polling: processing/success/failed
-  app/admin/(login|dashboard|keys)/ ← JWT admin panel
+  app/admin/(login|dashboard|keys|users|logs|settings)/ ← JWT admin panel
   lib/api.ts  hooks/queries.ts    ← typed API client + React Query hooks
 apps/api/test/                    ← Jest unit tests (license state machine, activation)
 packages/shared/test/             ← schema validation tests
@@ -57,8 +58,8 @@ pnpm dev                             # api + worker + web
 ```
 
 ## Activation flow (async, < 500ms HTTP)
-1. `POST /activate` validates the key in a DB transaction, writes a `pending` activation, enqueues a job → returns `{ requestId, state: "processing" }`.
-2. Worker sends `/activate <user> <key>` to the bot, awaits the reply (timeout 25s), parses it, commits the 30-day window atomically, caches the result in Redis.
+1. `POST /login` accepts `{ deviceCode }` (6 chars, A–Z0–9), writes a `pending` activation row, enqueues a BullMQ job → returns `{ requestId, state: "processing" }`.
+2. Worker sends `/login <code>` to the Surfshark bot, awaits the reply (timeout 25s), parses it (`success|failed|invalid|expired|banned`), updates the activation row, caches the result in Redis.
 3. Frontend polls `GET /status/:requestId` until `success` / `failed`.
 
 ## Deploy
@@ -77,7 +78,7 @@ Vercel (web) · Render (api + worker) · Supabase (Postgres) · Upstash (Redis).
 | API: activation + status | ✅ |
 | API: admin (auth, keys CRUD, dashboard, users, logs, settings, CSV export) | ✅ |
 | Telegram worker (GramJS, retry, FloodWait, DLQ) | ✅ |
-| Frontend public (landing, activate, status, error, 404) | ✅ |
+| Frontend public (landing, login, status, error, 404) | ✅ |
 | Frontend admin (login, shell, dashboard, keys, users, logs, settings) | ✅ |
 | Security (Helmet, CORS, throttle, Zod, argon2, AES-GCM session, audit) | ✅ |
 | Tests (unit + Playwright e2e) | ✅ |

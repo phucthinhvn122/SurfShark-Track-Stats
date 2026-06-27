@@ -62,7 +62,7 @@ Log in with the phone/code/2FA prompts. Copy the printed StringSession → `TG_S
 
 ## 7. Post-deploy checklist
 - [ ] `GET <api>/health` returns `{ status: "ok", checks: { db, redis, session } }`.
-- [ ] Frontend landing loads; `POST /activate` with a seeded unused key returns `202`.
+- [ ] Frontend landing loads; `POST /login` with `{ deviceCode: "ABCDEF" }` returns `202`.
 - [ ] Worker logs show "Telegram worker connected: true".
 - [ ] Admin login works (`admin` / your seed password) and key actions persist.
 - [ ] Lighthouse on the landing page ≥ 95.

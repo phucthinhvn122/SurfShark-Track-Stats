@@ -68,7 +68,7 @@ Remaining −4: external error tracking (Sentry), httpOnly-cookie auth option, T
 ### Post-deploy
 - [ ] `GET <api>/health` → **200** `{status:"ok",checks:{db,redis,session,worker}}` (503 if any core dep down).
 - [ ] Worker logs: `Telegram worker connected: true` + heartbeat present (`worker:true` in /health).
-- [ ] `POST /activate` (seeded unused key) → 202; status polls to success.
+- [ ] `POST /login` (`{ deviceCode: "ABCDEF" }`) → 202; status polls to success.
 - [ ] Admin login lockout works (11th wrong password → 429 locked).
 - [ ] Rate limit holds across 2 instances (hit >5/min from one IP → 429).
 - [ ] Audit log rows carry IP.
