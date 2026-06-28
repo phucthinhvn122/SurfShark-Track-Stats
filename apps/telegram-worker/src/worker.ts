@@ -24,7 +24,9 @@ import { SessionPool } from './session-pool';
 
 const HEARTBEAT_KEY = 'worker:heartbeat';
 const SESSIONS_KEY = 'worker:sessions';
+const BOT_TARGET_KEY = 'worker:bot-target';
 const DAY = 86_400_000;
+const DEFAULT_BOT_USERNAME = '@Vpnssfree_bot';
 
 if (process.env.SENTRY_DSN) {
   Sentry.init({ dsn: process.env.SENTRY_DSN, tracesSampleRate: 0.1, environment: process.env.NODE_ENV });
@@ -42,7 +44,7 @@ interface ActivationJob {
 
 const apiId = Number(process.env.TG_API_ID);
 const apiHash = process.env.TG_API_HASH!;
-const botUsername = process.env.BOT_USERNAME || '@Vpnssfree_bot';
+const botUsername = normalizeBotUsername(process.env.BOT_USERNAME);
 
 let pool: SessionPool;
 
@@ -56,6 +58,11 @@ function decryptSession(payload: string): string {
 }
 
 const maybeDecrypt = (s: string) => (s.split(':').length === 3 ? decryptSession(s) : s);
+
+function normalizeBotUsername(value: string | undefined): string {
+  const bot = (value || DEFAULT_BOT_USERNAME).trim();
+  return bot.toLowerCase() === '@surfsharkbot' ? DEFAULT_BOT_USERNAME : bot;
+}
 
 function maskKey(k: string, visible = 4): string {
   if (k.length <= visible * 2) return '*'.repeat(k.length);
@@ -208,11 +215,13 @@ async function main() {
   if (pool.healthyCount === 0) {
     console.error('WARNING: no healthy Telegram sessions — activations will fail until rotated.');
   }
+  console.log(`Telegram bot target: ${botUsername}`);
 
   // Heartbeat + pool stats — surfaced by the API /health endpoint.
   const beat = async () => {
     await connection.set(HEARTBEAT_KEY, String(Date.now())).catch(() => {});
     await connection.set(SESSIONS_KEY, JSON.stringify(pool.stats()), 'EX', 120).catch(() => {});
+    await connection.set(BOT_TARGET_KEY, botUsername, 'EX', 120).catch(() => {});
   };
   await beat();
   const heartbeat = setInterval(beat, 30_000);

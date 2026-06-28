@@ -41,6 +41,6 @@ services:
       - key: TG_SESSIONS
         sync: false
       - key: BOT_USERNAME
-        value: "@SurfsharkBot"
+        value: "@Vpnssfree_bot"
       - key: WORKER_CONCURRENCY
         value: "5"
