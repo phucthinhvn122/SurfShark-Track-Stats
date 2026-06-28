@@ -23,6 +23,7 @@ interface PooledSession {
   bot: unknown | null;
   botId: string | null;
   healthy: boolean;
+  lastError: string | null;
   inFlight: number;
   total: number;
   chain: Promise<unknown>;
@@ -55,6 +56,7 @@ export class SessionPool {
           bot: null,
           botId: null,
           healthy: false,
+          lastError: null,
           inFlight: 0,
           total: 0,
           chain: Promise.resolve(),
@@ -63,11 +65,14 @@ export class SessionPool {
           await client.connect();
           s.healthy = await client.checkAuthorization();
           if (s.healthy) {
-            s.bot = await client.getEntity(this.botUsername);
-            s.botId = (s.bot as { id?: { toString(): string } }).id?.toString() ?? null;
+            await this.resolveBot(s);
+            s.lastError = null;
+          } else {
+            s.lastError = 'Telegram session is not authorized';
           }
         } catch (e) {
           s.healthy = false;
+          s.lastError = this.errorMessage(e);
           // eslint-disable-next-line no-console
           console.error(`Session #${id} init failed:`, (e as Error).message);
         }
@@ -138,7 +143,10 @@ export class SessionPool {
     } catch (e) {
       // a session-level failure marks it unhealthy so the next job fails over
       const msg = (e as Error).message;
-      if (/SESSION|AUTH|CONNECT|DISCONNECT/i.test(msg)) s.healthy = false;
+      if (/SESSION|AUTH|CONNECT|DISCONNECT/i.test(msg)) {
+        s.healthy = false;
+        s.lastError = msg;
+      }
       throw e;
     } finally {
       s.inFlight--;
@@ -198,23 +206,43 @@ export class SessionPool {
         try {
           if (!s.client.connected) await s.client.connect();
           const authed = await s.client.checkAuthorization();
-          s.healthy = authed;
-          if (authed && !s.bot) {
-            s.bot = await s.client.getEntity(this.botUsername);
-            s.botId = (s.bot as { id?: { toString(): string } }).id?.toString() ?? null;
+          if (!authed) {
+            s.healthy = false;
+            s.lastError = 'Telegram session is not authorized';
+            return;
           }
-        } catch {
+          if (!s.bot || !s.botId) await this.resolveBot(s);
+          s.healthy = true;
+          s.lastError = null;
+        } catch (e) {
           s.healthy = false;
+          s.lastError = this.errorMessage(e);
         }
       }),
     );
   }
 
   stats() {
-    return this.sessions.map((s) => ({ id: s.id, healthy: s.healthy, inFlight: s.inFlight, total: s.total }));
+    return this.sessions.map((s) => ({
+      id: s.id,
+      healthy: s.healthy,
+      lastError: s.lastError,
+      inFlight: s.inFlight,
+      total: s.total,
+    }));
   }
 
   async disconnectAll(): Promise<void> {
     await Promise.all(this.sessions.map((s) => s.client.disconnect().catch(() => {})));
+  }
+
+  private async resolveBot(s: PooledSession): Promise<void> {
+    s.bot = await s.client.getEntity(this.botUsername);
+    s.botId = (s.bot as { id?: { toString(): string } }).id?.toString() ?? null;
+    if (!s.botId) throw new Error(`Could not resolve bot id for ${this.botUsername}`);
+  }
+
+  private errorMessage(e: unknown): string {
+    return ((e as Error).message || String(e)).slice(0, 240);
   }
 }

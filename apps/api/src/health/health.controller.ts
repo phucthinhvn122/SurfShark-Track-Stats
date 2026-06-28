@@ -13,6 +13,7 @@ const HEARTBEAT_STALE_MS = 90_000; // worker pings every 30s; stale after 90s
 type WorkerSessionStat = {
   id: number;
   healthy: boolean;
+  lastError?: string | null;
   inFlight: number;
   total: number;
 };
