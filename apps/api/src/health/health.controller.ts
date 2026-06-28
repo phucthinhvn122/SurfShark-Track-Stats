@@ -8,6 +8,7 @@ import { REDIS } from '../common/redis.module';
 const WORKER_HEARTBEAT_KEY = 'worker:heartbeat';
 const WORKER_SESSIONS_KEY = 'worker:sessions';
 const WORKER_BOT_TARGET_KEY = 'worker:bot-target';
+const WORKER_SESSION_COUNT_KEY = 'worker:session-count';
 const HEARTBEAT_STALE_MS = 90_000; // worker pings every 30s; stale after 90s
 
 type WorkerSessionStat = {
@@ -34,7 +35,7 @@ export class HealthController {
   async check(@Res() res: Response) {
     const checks: Record<string, boolean> = { db: false, redis: false, session: false, worker: false };
     let telegram:
-      | { botTarget?: string; healthySessions: number; totalSessions: number; sessions: WorkerSessionStat[] }
+      | { botTarget?: string; configuredSessions: number; healthySessions: number; totalSessions: number; sessions: WorkerSessionStat[] }
       | undefined;
 
     try {
@@ -58,6 +59,7 @@ export class HealthController {
       const sessions = raw ? (JSON.parse(raw) as WorkerSessionStat[]) : [];
       telegram = {
         botTarget: (await this.redis.get(WORKER_BOT_TARGET_KEY)) ?? undefined,
+        configuredSessions: Number((await this.redis.get(WORKER_SESSION_COUNT_KEY)) ?? sessions.length),
         healthySessions: sessions.filter((s) => s.healthy).length,
         totalSessions: sessions.length,
         sessions,

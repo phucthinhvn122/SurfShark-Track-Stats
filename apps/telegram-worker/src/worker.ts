@@ -25,6 +25,7 @@ import { SessionPool } from './session-pool';
 const HEARTBEAT_KEY = 'worker:heartbeat';
 const SESSIONS_KEY = 'worker:sessions';
 const BOT_TARGET_KEY = 'worker:bot-target';
+const SESSION_COUNT_KEY = 'worker:session-count';
 const DAY = 86_400_000;
 const DEFAULT_BOT_USERNAME = '@Vpnssfree_bot';
 
@@ -75,22 +76,27 @@ function maskDeviceCode(c: string): string {
 }
 
 /**
- * Resolve the session strings for the pool, in priority order:
- *   1. TG_SESSIONS env (comma-separated, encrypted or plain)
- *   2. TG_SESSION env (single)
- *   3. settings.telegramSession from the DB (encrypted)
+ * Resolve every configured session string for the pool. Env sessions and the
+ * admin Settings session are all tried so one stale env value cannot block a
+ * fresh DB-stored session.
  */
 async function resolveSessions(): Promise<string[]> {
-  const fromEnvMulti = process.env.TG_SESSIONS?.split(',').map((s) => s.trim()).filter(Boolean);
-  if (fromEnvMulti?.length) return fromEnvMulti.map(maybeDecrypt);
-  if (process.env.TG_SESSION) return [maybeDecrypt(process.env.TG_SESSION)];
+  const sessions: string[] = [];
+  const add = (value: string | undefined | null) => {
+    const trimmed = value?.trim();
+    if (trimmed) sessions.push(maybeDecrypt(trimmed));
+  };
+
+  process.env.TG_SESSIONS?.split(',').forEach(add);
+  add(process.env.TG_SESSION);
+
   try {
     const settings = await prisma.settings.findFirst({ where: { id: 1 } });
-    if (settings?.telegramSession) return [maybeDecrypt(settings.telegramSession)];
+    add(settings?.telegramSession);
   } catch (e) {
     console.error('Could not load session from DB:', (e as Error).message);
   }
-  return [];
+  return Array.from(new Set(sessions));
 }
 
 // ---------- parse the bot reply into a structured result ----------
@@ -222,6 +228,7 @@ async function main() {
     await connection.set(HEARTBEAT_KEY, String(Date.now())).catch(() => {});
     await connection.set(SESSIONS_KEY, JSON.stringify(pool.stats()), 'EX', 120).catch(() => {});
     await connection.set(BOT_TARGET_KEY, botUsername, 'EX', 120).catch(() => {});
+    await connection.set(SESSION_COUNT_KEY, String(sessions.length), 'EX', 120).catch(() => {});
   };
   await beat();
   const heartbeat = setInterval(beat, 30_000);
