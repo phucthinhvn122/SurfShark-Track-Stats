@@ -7,6 +7,13 @@ import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { loadEnv } from './config/env.config';
 
+const DEFAULT_ALLOWED_ORIGINS = ['http://localhost:3000', 'https://surfshark-activate.vercel.app'];
+
+function allowedWebOrigins(webOrigin: string): string[] {
+  const configuredOrigins = webOrigin.split(',').map((origin) => origin.trim()).filter(Boolean);
+  return Array.from(new Set([...configuredOrigins, ...DEFAULT_ALLOWED_ORIGINS]));
+}
+
 if (process.env.SENTRY_DSN) {
   Sentry.init({
     dsn: process.env.SENTRY_DSN,
@@ -28,7 +35,7 @@ async function bootstrap(): Promise<void> {
   app.useLogger(app.get(Logger));
   // WEB_ORIGIN may be a single URL or a comma-separated list of allowed origins
   // (useful for supporting production + Vercel preview deployments).
-  const allowedOrigins = env.WEB_ORIGIN.split(',').map((o) => o.trim()).filter(Boolean);
+  const allowedOrigins = allowedWebOrigins(env.WEB_ORIGIN);
   app.use(
     helmet({
       contentSecurityPolicy: {
