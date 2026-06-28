@@ -8,10 +8,16 @@ import { AppModule } from './app.module';
 import { loadEnv } from './config/env.config';
 
 const DEFAULT_ALLOWED_ORIGINS = ['http://localhost:3000', 'https://surfshark-activate.vercel.app'];
+const VERCEL_PREVIEW_ORIGIN = /^https:\/\/[a-z0-9-]+\.vercel\.app$/i;
 
 function allowedWebOrigins(webOrigin: string): string[] {
   const configuredOrigins = webOrigin.split(',').map((origin) => origin.trim()).filter(Boolean);
   return Array.from(new Set([...configuredOrigins, ...DEFAULT_ALLOWED_ORIGINS]));
+}
+
+function isAllowedOrigin(origin: string | undefined, allowedOrigins: string[]): boolean {
+  if (!origin) return true;
+  return allowedOrigins.includes(origin) || VERCEL_PREVIEW_ORIGIN.test(origin);
 }
 
 if (process.env.SENTRY_DSN) {
@@ -43,13 +49,15 @@ async function bootstrap(): Promise<void> {
           defaultSrc: ["'self'"],
           scriptSrc: ["'self'"],
           styleSrc: ["'self'", "'unsafe-inline'"],
-          connectSrc: ["'self'", ...allowedOrigins],
+          connectSrc: ["'self'", ...allowedOrigins, 'https://*.vercel.app'],
         },
       },
     }),
   );
   app.enableCors({
-    origin: allowedOrigins.length === 1 ? allowedOrigins[0] : allowedOrigins,
+    origin: (origin, callback) => {
+      callback(null, isAllowedOrigin(origin, allowedOrigins));
+    },
     methods: ['GET', 'POST', 'PATCH', 'DELETE'],
     credentials: false,
   });
