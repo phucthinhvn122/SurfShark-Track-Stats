@@ -3,6 +3,28 @@
 // Imported by main.ts and by any module that needs typed config.
 import { z } from 'zod';
 
+const commaSeparatedUrls = z.string().superRefine((value, ctx) => {
+  const urls = value.split(',').map((url) => url.trim()).filter(Boolean);
+
+  if (urls.length === 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'WEB_ORIGIN must contain at least one URL',
+    });
+    return;
+  }
+
+  for (const url of urls) {
+    const parsed = z.string().url().safeParse(url);
+    if (!parsed.success) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Invalid URL in WEB_ORIGIN: ${url}`,
+      });
+    }
+  }
+});
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3001),
@@ -15,7 +37,7 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
   SESSION_ENC_KEY: z.string().min(32, 'SESSION_ENC_KEY must be at least 32 characters'),
 
-  WEB_ORIGIN: z.string().url(),
+  WEB_ORIGIN: commaSeparatedUrls,
 
   // Telegram user account (used by key-redeem's TelegramService and worker).
   TG_API_ID: z.coerce.number().int().positive().optional(),
