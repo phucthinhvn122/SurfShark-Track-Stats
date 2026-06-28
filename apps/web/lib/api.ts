@@ -1,7 +1,7 @@
 // apps/web/lib/api.ts
 import type { StatusResponse } from '@surfshark/shared';
 
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+const BASE = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001').trim().replace(/\/+$/, '');
 
 /** Error thrown for network/CORS failures so callers can distinguish them
  *  from API-side errors and surface a useful message. */
