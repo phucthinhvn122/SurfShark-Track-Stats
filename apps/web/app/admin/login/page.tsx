@@ -2,7 +2,7 @@
 'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { api } from '../../../lib/api';
+import { api, ApiUnreachableError } from '../../../lib/api';
 
 export default function AdminLogin() {
   const router = useRouter();
@@ -19,7 +19,11 @@ export default function AdminLogin() {
       sessionStorage.setItem('admin_token', accessToken);
       router.push('/admin/dashboard');
     } catch (err: any) {
-      setError(err.message ?? 'Login failed');
+      if (err instanceof ApiUnreachableError) {
+        setError(err.message);
+      } else {
+        setError(err?.message ?? 'Login failed');
+      }
     } finally {
       setLoading(false);
     }

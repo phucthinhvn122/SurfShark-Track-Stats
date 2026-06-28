@@ -26,6 +26,9 @@ async function bootstrap(): Promise<void> {
   expressApp.set('trust proxy', 1);
 
   app.useLogger(app.get(Logger));
+  // WEB_ORIGIN may be a single URL or a comma-separated list of allowed origins
+  // (useful for supporting production + Vercel preview deployments).
+  const allowedOrigins = env.WEB_ORIGIN.split(',').map((o) => o.trim()).filter(Boolean);
   app.use(
     helmet({
       contentSecurityPolicy: {
@@ -33,13 +36,13 @@ async function bootstrap(): Promise<void> {
           defaultSrc: ["'self'"],
           scriptSrc: ["'self'"],
           styleSrc: ["'self'", "'unsafe-inline'"],
-          connectSrc: ["'self'", env.WEB_ORIGIN],
+          connectSrc: ["'self'", ...allowedOrigins],
         },
       },
     }),
   );
   app.enableCors({
-    origin: env.WEB_ORIGIN,
+    origin: allowedOrigins.length === 1 ? allowedOrigins[0] : allowedOrigins,
     methods: ['GET', 'POST', 'PATCH', 'DELETE'],
     credentials: false,
   });

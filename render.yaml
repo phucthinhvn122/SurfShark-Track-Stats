@@ -22,6 +22,9 @@ services:
       - key: SESSION_ENC_KEY
         generateValue: true
       - key: WEB_ORIGIN
+        # Comma-separated list of allowed web origins (CORS). Must include the
+        # Vercel production domain AND any preview/custom domains the admin UI
+        # is served from. Example: "https://surfshark-activate.vercel.app,https://admin.example.com"
         sync: false
       - key: SENTRY_DSN
         sync: false

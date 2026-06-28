@@ -3,12 +3,54 @@ import type { StatusResponse } from '@surfshark/shared';
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
+/** Error thrown for network/CORS failures so callers can distinguish them
+ *  from API-side errors and surface a useful message. */
+export class ApiUnreachableError extends Error {
+  readonly cause?: unknown;
+  readonly url: string;
+  constructor(message: string, url: string, cause?: unknown) {
+    super(message);
+    this.name = 'ApiUnreachableError';
+    this.url = url;
+    this.cause = cause;
+  }
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    ...init,
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
-  });
-  const json = await res.json();
+  const url = `${BASE}${path}`;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...init,
+      headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+    });
+  } catch (e) {
+    // fetch() rejects on DNS, connection refused, mixed-content, or CORS block.
+    // The browser hides the real reason; surface something actionable.
+    // eslint-disable-next-line no-console
+    console.error(`[api] network error hitting ${url}`, e);
+    throw new ApiUnreachableError(
+      `Cannot reach API at ${BASE}. Check your network, or contact the admin if the service is down.`,
+      url,
+      e,
+    );
+  }
+
+  let json: any;
+  try {
+    json = await res.json();
+  } catch (e) {
+    // Non-JSON response (e.g. HTML 502 from a proxy). Treat as unreachable so
+    // the user sees a clear message instead of a raw parse error.
+    // eslint-disable-next-line no-console
+    console.error(`[api] non-JSON response from ${url} (status ${res.status})`, e);
+    throw new ApiUnreachableError(
+      `API at ${BASE} returned a non-JSON response (HTTP ${res.status}). The service may be down.`,
+      url,
+      e,
+    );
+  }
+
   if (!res.ok || json.success === false) {
     const err = json?.error ?? { code: 'ERR_INTERNAL', message: 'Request failed' };
     throw Object.assign(new Error(err.message), { code: err.code });
