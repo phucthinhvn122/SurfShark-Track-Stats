@@ -26,7 +26,7 @@ describe('activateSchema', () => {
 
 describe('bulkCreateSchema', () => {
   it('accepts supported key durations', () => {
-    for (const durationDays of [0, 7, 30, 365]) {
+    for (const durationDays of [0, 7, 14, 30, 365, 3650]) {
       const r = bulkCreateSchema.parse({ count: 1, durationDays });
       assert.equal(r.durationDays, durationDays);
     }
@@ -38,6 +38,8 @@ describe('bulkCreateSchema', () => {
   });
 
   it('rejects unsupported key durations', () => {
-    assert.equal(bulkCreateSchema.safeParse({ count: 1, durationDays: 14 }).success, false);
+    assert.equal(bulkCreateSchema.safeParse({ count: 1, durationDays: -1 }).success, false);
+    assert.equal(bulkCreateSchema.safeParse({ count: 1, durationDays: 3651 }).success, false);
+    assert.equal(bulkCreateSchema.safeParse({ count: 1, durationDays: 1.5 }).success, false);
   });
 });

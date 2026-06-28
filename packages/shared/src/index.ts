@@ -6,7 +6,7 @@ export const LICENSE_REGEX = /^VPN-[A-Z0-9]{4}-[A-Z0-9]{4}$/;
 export const DEVICE_CODE_REGEX = /^[A-Z0-9]{6}$/;
 export const KEY_DURATION_DAYS = [0, 7, 30, 365] as const;
 export type KeyDurationDays = (typeof KEY_DURATION_DAYS)[number];
-export const keyDurationSchema = z.union([z.literal(0), z.literal(7), z.literal(30), z.literal(365)]);
+export const keyDurationSchema = z.number().int().min(0).max(3650);
 
 /** Legacy license-key activation (kept for admin-side license management). */
 export const activateSchema = z.object({
