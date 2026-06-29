@@ -72,31 +72,76 @@ export class LicenseService {
 
   /**
    * Persists a pending activation row and links it to the license. The license
-   * itself is not mutated here — the worker commits the final state.
+   * itself is not mutated here; the worker commits the final state.
    */
   async reserveActivation(licenseKey: string, ctx: ReservationContext): Promise<License> {
-    const license = await this.assertActivatable(licenseKey);
     try {
-      await this.prisma.activation.create({
-        data: {
-          requestId: ctx.requestId,
-          licenseId: license.id,
-          deviceCode: ctx.deviceCode,
-          ipAddress: ctx.ipAddress,
-          country: ctx.country,
-          device: ctx.device,
-          sessionMeta: ctx.sessionMeta as object | undefined,
-        },
+      return await this.prisma.$transaction(async (tx) => {
+        const locked = await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT id FROM licenses WHERE license_key = ${licenseKey} FOR UPDATE`;
+        if (!locked[0]) {
+          throw new AppException(ErrorCode.KEY_NOT_FOUND, 'License key not found', HttpStatus.NOT_FOUND);
+        }
+
+        const license = await tx.license.findUnique({ where: { id: locked[0].id } });
+        if (!license) {
+          throw new AppException(ErrorCode.KEY_NOT_FOUND, 'License key not found', HttpStatus.NOT_FOUND);
+        }
+
+        let fresh = license;
+        if (
+          fresh.status === 'active' &&
+          fresh.expiredAt &&
+          fresh.expiredAt.getTime() <= Date.now()
+        ) {
+          fresh = await tx.license.update({
+            where: { id: fresh.id },
+            data: { status: 'expired' },
+          });
+        }
+        if (fresh.status === 'banned') {
+          throw new AppException(ErrorCode.KEY_BANNED, 'License key has been banned', HttpStatus.FORBIDDEN);
+        }
+        if (fresh.status === 'expired') {
+          throw new AppException(ErrorCode.KEY_EXPIRED, 'License key has expired', HttpStatus.FORBIDDEN);
+        }
+        if (fresh.status === 'active') {
+          throw new AppException(ErrorCode.KEY_IN_USE, 'License key already in use', HttpStatus.CONFLICT);
+        }
+
+        const pending = await tx.activation.findFirst({
+          where: { licenseId: fresh.id, result: 'pending' },
+          select: { id: true },
+        });
+        if (pending) {
+          throw new AppException(
+            ErrorCode.VALIDATION,
+            'Activation already in progress for this license',
+            HttpStatus.CONFLICT,
+          );
+        }
+
+        await tx.activation.create({
+          data: {
+            requestId: ctx.requestId,
+            licenseId: fresh.id,
+            deviceCode: ctx.deviceCode,
+            ipAddress: ctx.ipAddress,
+            country: ctx.country,
+            device: ctx.device,
+            sessionMeta: ctx.sessionMeta as object | undefined,
+          },
+        });
+        return fresh;
       });
     } catch (e) {
-      // Same requestId twice → idempotent re-submit, surface as conflict.
+      if (e instanceof AppException) throw e;
       throw new AppException(
         ErrorCode.VALIDATION,
         'Activation already in progress for this request',
         HttpStatus.CONFLICT,
       );
     }
-    return license;
   }
 
   /** Hourly cron: flip active keys whose 30-day window has passed to `expired`. */

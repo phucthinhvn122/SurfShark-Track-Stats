@@ -77,7 +77,7 @@ describe('KeyRedeemService.redeem', () => {
     const devices = makeDevices();
     devices.getDeviceCode.mockResolvedValue('ABC123');
     const telegram = makeTelegram();
-    telegram.sendLoginCommand.mockResolvedValue({ ok: false, code: 'bot_rejected', message: 'expired', attempts: 3, durationMs: 1200 });
+    telegram.sendLoginCommand.mockResolvedValue({ ok: false, code: 'bot_rejected', message: 'expired', attempts: 1, durationMs: 1200 });
 
     const svc = new KeyRedeemService(keys as any, devices as any, telegram as any);
     const r = await svc.redeem({ key: 'VPN-A9X2-K8LM' } as any, {});

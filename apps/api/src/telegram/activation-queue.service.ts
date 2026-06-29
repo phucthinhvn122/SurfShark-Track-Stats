@@ -13,6 +13,7 @@ export interface ActivationJob {
 /**
  * API-side PRODUCER only. Enqueues activation jobs for the Telegram worker.
  * jobId = requestId makes double-submits idempotent.
+ * Attempts stay at 1 so each activation sends a single Telegram /login command.
  * FIX (audit): reuses the shared Redis connection instead of opening its own.
  */
 @Injectable()
@@ -26,8 +27,7 @@ export class ActivationQueueService implements OnModuleDestroy {
   async enqueue(job: ActivationJob) {
     await this.queue.add('activate', job, {
       jobId: job.requestId,
-      attempts: 5,
-      backoff: { type: 'exponential', delay: 2000 },
+      attempts: 1,
       removeOnComplete: 1000,
       removeOnFail: false, // kept for inspection / DLQ handling
     });

@@ -1,6 +1,6 @@
 // apps/web/app/login/page.tsx
 'use client';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -12,17 +12,24 @@ export default function LoginPage() {
   const router = useRouter();
   const login = useLogin();
   const [serverError, setServerError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const submitInFlight = useRef(false);
 
   const { register, handleSubmit, formState: { errors } } = useForm<DeviceLoginInput>({
     resolver: zodResolver(deviceLoginSchema),
   });
 
   const onSubmit = handleSubmit(async (values) => {
+    if (submitInFlight.current || login.isPending) return;
+    submitInFlight.current = true;
+    setIsSubmitting(true);
     setServerError(null);
     try {
       const { requestId } = await login.mutateAsync(values);
       router.push(`/status/${requestId}`);
     } catch (e: any) {
+      submitInFlight.current = false;
+      setIsSubmitting(false);
       setServerError(e.message ?? 'Login failed');
     }
   });
@@ -64,8 +71,8 @@ export default function LoginPage() {
 
           {serverError && <div className="text-red-400 text-sm">{serverError}</div>}
 
-          <button type="submit" disabled={login.isPending} className="btn-primary w-full">
-            {login.isPending ? 'Submitting…' : 'Login'}
+          <button type="submit" disabled={isSubmitting || login.isPending} className="btn-primary w-full">
+            {isSubmitting || login.isPending ? 'Submitting...' : 'Login'}
           </button>
         </form>
       </motion.div>

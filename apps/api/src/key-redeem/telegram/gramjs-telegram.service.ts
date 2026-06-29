@@ -8,7 +8,7 @@
 //     can never be matched to the wrong job — even though a key-redeem request
 //     is a single user interaction.
 //   - Honours a minimum delay between sends to avoid Telegram FloodWait.
-//   - Retries transient failures (network/TG_TIMEOUT) with exponential backoff.
+//   - Sends one command per request; callers can decide whether to retry.
 //
 // Reply parser (parseBotReply) is intentionally narrow: it only acts on words
 // the Surfshark bot is known to use. Anything ambiguous is surfaced as
@@ -31,7 +31,7 @@ import { parseBotReply } from './parse-reply';
 
 const MIN_SEND_INTERVAL_MS = 1_500;
 const DEFAULT_REPLY_TIMEOUT_MS = 25_000;
-const MAX_ATTEMPTS = 3;
+const MAX_ATTEMPTS = 1;
 const BACKOFF_BASE_MS = 1_000;
 
 @Injectable()
