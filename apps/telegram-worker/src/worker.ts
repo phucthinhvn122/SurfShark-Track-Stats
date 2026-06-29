@@ -26,6 +26,7 @@ const HEARTBEAT_KEY = 'worker:heartbeat';
 const SESSIONS_KEY = 'worker:sessions';
 const BOT_TARGET_KEY = 'worker:bot-target';
 const SESSION_COUNT_KEY = 'worker:session-count';
+const LOGIN_SENT_KEY_PREFIX = 'login:sent:';
 const DAY = 86_400_000;
 const DEFAULT_BOT_USERNAME = '@Vpnssfree_bot';
 
@@ -115,6 +116,17 @@ async function writeStatus(requestId: string, status: StatusResponse) {
   await connection.set(`status:${requestId}`, JSON.stringify(status), 'EX', 3600);
 }
 
+async function failAlreadySent(requestId: string) {
+  await prisma.activation.update({ where: { requestId }, data: { result: 'failed' } }).catch(() => {});
+  await writeStatus(requestId, {
+    state: 'failed',
+    error: {
+      code: 'ERR_DUPLICATE_REQUEST',
+      message: 'This login request was already sent once. Please start a new login if needed.',
+    },
+  });
+}
+
 async function commitLicenseActivation(licenseKey: string) {
   return prisma.$transaction(async (tx) => {
     const locked = await tx.$queryRaw<Array<{ id: string; status: string; duration_days: number }>>`
@@ -145,10 +157,20 @@ async function processJob(job: Job<ActivationJob>) {
   if (existing && existing.result !== 'pending') {
     return;
   }
+  if (job.attemptsMade > 0) {
+    await failAlreadySent(requestId);
+    return;
+  }
 
   const command = `/login ${deviceCode}`;
   // Persist masked command so DB logs never contain the raw device code.
   const maskedCommand = `/login ${maskDeviceCode(deviceCode)}`;
+  const sentKey = `${LOGIN_SENT_KEY_PREFIX}${requestId}`;
+  const firstSend = await connection.set(sentKey, '1', 'EX', 3600, 'NX');
+  if (firstSend !== 'OK') {
+    await failAlreadySent(requestId);
+    return;
+  }
   await prisma.telegramLog.create({ data: { action: 'login', request: maskedCommand, status: 'sent' } });
 
   let replyText: string;
