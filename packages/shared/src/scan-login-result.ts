@@ -33,9 +33,9 @@ export interface LoginScanResult {
   raw: string;
 }
 
-/** Detect failure first so it wins when "success" + "false" both appear. */
-const FAILED_RE = /false|failed/i;
-const SUCCESS_RE = /success/i;
+/** Detect failure first so it wins when success + failure both appear. */
+const FAILED_RE = /\bthat\s*bai\b/i;
+const SUCCESS_RE = /\bthanh\s*cong\b/i;
 
 /** Coerce any response (string | object | unknown) into a searchable string. */
 function normalize(response: unknown): string {
@@ -49,21 +49,29 @@ function normalize(response: unknown): string {
   }
 }
 
+function searchableText(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
 /**
  * Scan a finished command's response and classify the login outcome.
  * Pure + synchronous — safe to unit test and reuse anywhere.
  */
 export function scanLoginResult(response: unknown): LoginScanResult {
   const raw = normalize(response).trim();
+  const text = searchableText(raw);
   const ts = new Date().toISOString();
 
   let result: LoginScanResult;
   if (raw === '') {
     result = { status: 'failed', message: '❌ Login Failed: Empty response', raw };
-  } else if (FAILED_RE.test(raw)) {
+  } else if (FAILED_RE.test(text)) {
     // priority: failed beats success
     result = { status: 'failed', message: '❌ Login Failed', raw };
-  } else if (SUCCESS_RE.test(raw)) {
+  } else if (SUCCESS_RE.test(text)) {
     result = { status: 'success', message: '✅ Login Success', raw };
   } else {
     result = {

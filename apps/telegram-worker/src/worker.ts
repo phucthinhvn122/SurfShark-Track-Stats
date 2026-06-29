@@ -101,8 +101,17 @@ async function resolveSessions(): Promise<string[]> {
 }
 
 // ---------- parse the bot reply into a structured result ----------
+function searchableText(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
 function parseReply(text: string): { ok: boolean; reason?: string } {
-  const t = text.toLowerCase();
+  const t = searchableText(text);
+  if (/\bthat\s*bai\b/.test(t)) return { ok: false, reason: 'failed' };
+  if (/\bthanh\s*cong\b/.test(t)) return { ok: true };
   if (/✅|activated|logged in|success|valid|welcome/.test(t)) return { ok: true };
   if (/banned|blocked/.test(t)) return { ok: false, reason: 'banned' };
   if (/expired/.test(t)) return { ok: false, reason: 'expired' };
