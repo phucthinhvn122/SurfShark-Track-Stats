@@ -19,7 +19,7 @@ import IORedis from 'ioredis';
 import { PrismaClient } from '@prisma/client';
 import { FloodWaitError } from 'telegram/errors';
 import { createDecipheriv, scryptSync } from 'crypto';
-import type { StatusResponse } from '@surfshark/shared';
+import { scanLoginResult, type StatusResponse } from '@surfshark/shared';
 import { SessionPool } from './session-pool';
 
 const HEARTBEAT_KEY = 'worker:heartbeat';
@@ -169,6 +169,12 @@ async function processJob(job: Job<ActivationJob>) {
     data: { action: 'login', request: maskedCommand, response: `[s${sessionId}] ${replyText}`, status: 'received' },
   });
 
+  // Scan the bot reply into a friendly ✅/❌/⚠️ summary that rides along on the
+  // status the web page polls — so the user sees the outcome right where they
+  // ran the login. (parseReply below stays authoritative for the license commit.)
+  const scanResult = scanLoginResult(replyText);
+  const scan = { status: scanResult.status, message: scanResult.message };
+
   const parsed = parseReply(replyText);
   if (!parsed.ok) {
     // 'unexpected' is retryable (parser/transient); definitive 'no' is terminal.
@@ -176,6 +182,7 @@ async function processJob(job: Job<ActivationJob>) {
     await prisma.activation.update({ where: { requestId }, data: { result: 'failed' } });
     await writeStatus(requestId, {
       state: 'failed',
+      scan,
       error: { code: `ERR_BOT_${parsed.reason?.toUpperCase()}`, message: replyText },
     });
     return;
@@ -188,6 +195,7 @@ async function processJob(job: Job<ActivationJob>) {
     await prisma.activation.update({ where: { requestId }, data: { result: 'failed' } });
     await writeStatus(requestId, {
       state: 'failed',
+      scan,
       error: { code: err.message || 'ERR_KEY_IN_USE', message: 'License key is no longer available' },
     });
     return;
@@ -196,6 +204,7 @@ async function processJob(job: Job<ActivationJob>) {
   await prisma.activation.update({ where: { requestId }, data: { result: 'success', licenseId: license.id } });
   await writeStatus(requestId, {
     state: 'success',
+    scan,
     deviceCode,
     licenseKey: license.licenseKey,
     durationDays: license.durationDays,

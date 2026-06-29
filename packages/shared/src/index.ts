@@ -1,6 +1,7 @@
 // packages/shared/src/index.ts
 // Shared Zod schemas + types — imported by web, api, and worker.
 import { z } from 'zod';
+import type { LoginScanStatus } from './scan-login-result';
 
 export * from './scan-login-result';
 
@@ -81,6 +82,12 @@ export interface StatusResponse {
   activatedAt?: string;
   expiredAt?: string;
   error?: { code: string; message: string };
+  /**
+   * Human-readable scan of the Telegram bot reply (✅ / ❌ / ⚠️), surfaced to
+   * the web status page so the user sees the outcome where they ran the login.
+   * See {@link scanLoginResult}.
+   */
+  scan?: { status: LoginScanStatus; message: string };
 }
 
 // Uniform API error codes
