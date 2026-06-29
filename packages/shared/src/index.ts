@@ -2,6 +2,8 @@
 // Shared Zod schemas + types — imported by web, api, and worker.
 import { z } from 'zod';
 
+export * from './scan-login-result';
+
 export const LICENSE_REGEX = /^VPN-[A-Z0-9]{4}-[A-Z0-9]{4}$/;
 export const DEVICE_CODE_REGEX = /^[A-Z0-9]{6}$/;
 export const KEY_DURATION_DAYS = [0, 7, 30, 365] as const;
