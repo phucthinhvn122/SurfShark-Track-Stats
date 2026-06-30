@@ -109,13 +109,17 @@ function searchableText(value: string): string {
 }
 
 function parseReply(text: string): { ok: boolean; reason?: string } {
+  // `t` is diacritics-stripped + lowercased, so Vietnamese matches use the
+  // ASCII fold ("thất bại" -> "that bai", "hết hạn" -> "het han").
   const t = searchableText(text);
-  if (/\bthat\s*bai\b/.test(t)) return { ok: false, reason: 'failed' };
-  if (/\bthanh\s*cong\b/.test(t)) return { ok: true };
+  // Failure first so it wins when a reply mentions both outcomes.
+  if (/\bthat\s*bai\b|khong\s*thanh\s*cong/.test(t)) return { ok: false, reason: 'failed' };
+  if (/\bthanh\s*cong\b|dang\s*nhap\s*thanh\s*cong/.test(t)) return { ok: true };
   if (/✅|activated|logged in|success|valid|welcome/.test(t)) return { ok: true };
-  if (/banned|blocked/.test(t)) return { ok: false, reason: 'banned' };
-  if (/expired/.test(t)) return { ok: false, reason: 'expired' };
-  if (/invalid|not found|unknown|wrong/.test(t)) return { ok: false, reason: 'invalid' };
+  if (/banned|blocked|bi\s*cam|bi\s*khoa/.test(t)) return { ok: false, reason: 'banned' };
+  if (/expired|het\s*han/.test(t)) return { ok: false, reason: 'expired' };
+  if (/invalid|not found|unknown|wrong|khong\s*hop\s*le|khong\s*tim\s*thay|khong\s*dung|\bsai\b|da\s*(duoc\s*)?su\s*dung|da\s*kich\s*hoat/.test(t))
+    return { ok: false, reason: 'invalid' };
   // unexpected format → alert (parser drift) and treat as retryable failure
   Sentry.captureMessage(`Unexpected bot reply: ${text.slice(0, 200)}`, 'warning');
   return { ok: false, reason: 'unexpected' };
@@ -292,10 +296,14 @@ async function main() {
     if (job && job.attemptsMade >= (job.opts.attempts ?? 1)) {
       await dlq.add('dead', { ...job.data, error: err.message });
       await prisma.activation.update({ where: { requestId: job.data.requestId }, data: { result: 'failed' } }).catch(() => {});
-      await writeStatus(job.data.requestId, {
-        state: 'failed',
-        error: { code: 'ERR_TELEGRAM_UNAVAILABLE', message: 'Activation service temporarily unavailable' },
-      });
+      // Don't blame Telegram for every exhausted job: a reply the parser didn't
+      // recognise rode through fine — it's parser drift, not an outage. Map the
+      // thrown marker to the right code so the user sees the real cause.
+      const error =
+        err.message === 'TG_UNEXPECTED_REPLY'
+          ? { code: 'ERR_BOT_UNRECOGNIZED', message: 'The bot replied in an unrecognised format. We are looking into it.' }
+          : { code: 'ERR_TELEGRAM_UNAVAILABLE', message: 'Activation service temporarily unavailable' };
+      await writeStatus(job.data.requestId, { state: 'failed', error });
     }
   });
 

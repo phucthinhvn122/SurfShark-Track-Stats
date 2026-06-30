@@ -101,6 +101,9 @@ export const ErrorCode = {
   DEVICE_CODE_UNAVAILABLE: 'ERR_DEVICE_CODE_UNAVAILABLE',
   TELEGRAM_UNAVAILABLE: 'ERR_TELEGRAM_UNAVAILABLE',
   TELEGRAM_RATE_LIMITED: 'ERR_TELEGRAM_RATE_LIMITED',
+  // Telegram round-trip succeeded but the bot reply didn't match any known
+  // pattern — a parser-drift problem, NOT a Telegram outage.
+  BOT_UNRECOGNIZED: 'ERR_BOT_UNRECOGNIZED',
   RATE_LIMITED: 'ERR_RATE_LIMITED',
   UNAUTHORIZED: 'ERR_UNAUTHORIZED',
   INTERNAL: 'ERR_INTERNAL',
