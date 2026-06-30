@@ -28,9 +28,14 @@ import {
   type TelegramService,
 } from './telegram.types';
 import { parseBotReply } from './parse-reply';
+import { isIntermediateReply } from '@surfshark/shared';
 
 const MIN_SEND_INTERVAL_MS = 1_500;
 const DEFAULT_REPLY_TIMEOUT_MS = 25_000;
+// Absolute cap across all messages of one send: the bot acks with a transient
+// "⏳ Đang xử lý…" placeholder before the real outcome, so we may wait through
+// several messages before a terminal one arrives.
+const MAX_REPLY_WAIT_MS = 90_000;
 const MAX_ATTEMPTS = 1;
 const BACKOFF_BASE_MS = 1_000;
 
@@ -178,22 +183,35 @@ export class GramJsTelegramService implements TelegramService, OnModuleDestroy {
         return;
       }
       const filter = new NewMessage({ incoming: true });
+      const deadline = Date.now() + MAX_REPLY_WAIT_MS;
+      let timer: ReturnType<typeof setTimeout>;
+      const arm = () => {
+        const remaining = Math.max(0, Math.min(timeoutMs, deadline - Date.now()));
+        timer = setTimeout(() => {
+          cleanup();
+          reject(new Error('TG_TIMEOUT'));
+        }, remaining);
+      };
       const handler = (event: NewMessageEvent) => {
         const senderId = event.message.senderId?.toString();
-        if (senderId && senderId === this.botId) {
-          cleanup();
-          resolve(event.message.message ?? '');
+        if (!senderId || senderId !== this.botId) return;
+        const text = event.message.message ?? '';
+        // Skip the transient "⏳ Đang xử lý…" placeholder and keep waiting for the
+        // real result, as long as we're within the absolute deadline.
+        if (isIntermediateReply(text) && Date.now() < deadline) {
+          clearTimeout(timer);
+          arm();
+          return;
         }
-      };
-      const timer = setTimeout(() => {
         cleanup();
-        reject(new Error('TG_TIMEOUT'));
-      }, timeoutMs);
+        resolve(text);
+      };
       const cleanup = () => {
         clearTimeout(timer);
         this.client?.removeEventHandler(handler, filter);
       };
       this.client.addEventHandler(handler, filter);
+      arm();
       this.client
         .sendMessage(this.bot as never, { message: command })
         .catch((e: Error) => {

@@ -11,6 +11,7 @@
 import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions';
 import { NewMessage, NewMessageEvent } from 'telegram/events';
+import { isIntermediateReply } from '@surfshark/shared';
 
 export interface PoolSendResult {
   text: string;
@@ -40,6 +41,11 @@ export class SessionPool {
     private readonly botUsername: string,
     private readonly sessionStrings: string[],
     private readonly replyTimeoutMs = 25_000,
+    // Hard cap across all messages of one send: the bot acks with a transient
+    // "⏳ Đang xử lý…" placeholder before the real result, so we may wait through
+    // several messages. This bounds the total wait so a bot stuck emitting only
+    // placeholders still eventually times out and lets the chain advance.
+    private readonly maxReplyWaitMs = 90_000,
   ) {}
 
   /** Connect every session and resolve the bot entity once per session. */
@@ -153,26 +159,45 @@ export class SessionPool {
     }
   }
 
-  /** Register a handler, send the command, await the bot reply or TG_TIMEOUT. */
+  /**
+   * Register a handler, send the command, await the bot's terminal reply or
+   * TG_TIMEOUT. The bot first acks with a transient "⏳ Đang xử lý…" placeholder
+   * and only later sends the real outcome, so intermediate replies are skipped
+   * (re-arming the per-message inactivity timer) and we resolve on the first
+   * terminal message — bounded by an absolute deadline.
+   */
   private collectReply(s: PooledSession, command: string): Promise<string> {
     return new Promise<string>((resolve, reject) => {
       const filter = new NewMessage({ incoming: true });
+      const deadline = Date.now() + this.maxReplyWaitMs;
+      let timer: ReturnType<typeof setTimeout>;
+      const arm = () => {
+        const remaining = Math.max(0, Math.min(this.replyTimeoutMs, deadline - Date.now()));
+        timer = setTimeout(() => {
+          cleanup();
+          reject(new Error('TG_TIMEOUT'));
+        }, remaining);
+      };
       const handler = (event: NewMessageEvent) => {
         const senderId = event.message.senderId?.toString();
-        if (senderId && s.botId && senderId === s.botId) {
-          cleanup();
-          resolve(event.message.message ?? '');
+        if (!senderId || !s.botId || senderId !== s.botId) return;
+        const text = event.message.message ?? '';
+        // Skip the placeholder ack and keep waiting for the real result, as long
+        // as we're still within the absolute deadline.
+        if (isIntermediateReply(text) && Date.now() < deadline) {
+          clearTimeout(timer);
+          arm();
+          return;
         }
-      };
-      const timer = setTimeout(() => {
         cleanup();
-        reject(new Error('TG_TIMEOUT'));
-      }, this.replyTimeoutMs);
+        resolve(text);
+      };
       function cleanup() {
         clearTimeout(timer);
         s.client.removeEventHandler(handler, filter);
       }
       s.client.addEventHandler(handler, filter);
+      arm();
       void s.client.sendMessage(s.bot as any, { message: command }).catch((e) => {
         cleanup();
         reject(e);

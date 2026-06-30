@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { scanLoginResult } from '../src/index';
+import { scanLoginResult, isIntermediateReply } from '../src/index';
 
 describe('scanLoginResult', () => {
   it('detects Vietnamese success text with or without accents', () => {
@@ -20,5 +20,20 @@ describe('scanLoginResult', () => {
 
   it('returns unknown when neither phrase is present', () => {
     assert.equal(scanLoginResult('Dang xu ly').status, 'unknown');
+  });
+});
+
+describe('isIntermediateReply', () => {
+  it('detects the transient processing placeholder (with or without accents)', () => {
+    assert.equal(isIntermediateReply('⏳ Đang xử lý đăng nhập với mã: ERYVGE...'), true);
+    assert.equal(isIntermediateReply('Dang xu ly dang nhap'), true);
+    assert.equal(isIntermediateReply('Processing, please wait'), true);
+  });
+
+  it('treats terminal success/failure replies as non-intermediate', () => {
+    assert.equal(isIntermediateReply('✅ Đăng nhập thành công với mã: MJKX8Y!'), false);
+    assert.equal(isIntermediateReply('Đăng nhập thất bại'), false);
+    assert.equal(isIntermediateReply(''), false);
+    assert.equal(isIntermediateReply(null), false);
   });
 });

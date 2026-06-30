@@ -62,6 +62,8 @@ function searchableText(value: string): string {
   return value
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
+    // \u0111/\u0110 is a standalone letter (not a combining diacritic) \u2014 fold to "d".
+    .replace(/[\u0111\u0110]/g, 'd')
     .toLowerCase();
 }
 

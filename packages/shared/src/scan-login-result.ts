@@ -37,6 +37,15 @@ export interface LoginScanResult {
 const FAILED_RE = /\bthat\s*bai\b/i;
 const SUCCESS_RE = /\bthanh\s*cong\b/i;
 
+/**
+ * Transient acknowledgements some bots send BEFORE the real outcome, e.g.
+ * "⏳ Đang xử lý đăng nhập với mã: …" ("Processing login with code…"). These are
+ * NOT terminal — a reply collector should skip them and keep waiting for the next
+ * bot message rather than classifying them. Matched against the diacritics-stripped
+ * fold ("đang xử lý" -> "dang xu ly").
+ */
+const INTERMEDIATE_RE = /dang\s*xu\s*ly|processing|please\s*wait|vui\s*long\s*(doi|cho)/;
+
 /** Coerce any response (string | object | unknown) into a searchable string. */
 function normalize(response: unknown): string {
   if (response == null) return '';
@@ -53,6 +62,9 @@ function searchableText(value: string): string {
   return value
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
+    // \u0111/\u0110 is a standalone letter (not a combining diacritic) so NFD leaves it
+    // intact \u2014 fold it to "d" so ASCII patterns match "\u0111\u0103ng nh\u1eadp" -> "dang nhap".
+    .replace(/[\u0111\u0110]/g, 'd')
     .toLowerCase();
 }
 
@@ -84,6 +96,16 @@ export function scanLoginResult(response: unknown): LoginScanResult {
   // Log with timestamp for traceability.
   logger.log(`[${ts}] scanLoginResult -> ${result.status} | raw="${raw.slice(0, 200)}"`);
   return result;
+}
+
+/**
+ * True when a bot reply is only a transient "processing"/"please wait"
+ * acknowledgement and the real success/failure outcome is still to come. Reply
+ * collectors use this to skip the placeholder and keep awaiting the next message.
+ */
+export function isIntermediateReply(response: unknown): boolean {
+  const text = searchableText(normalize(response));
+  return INTERMEDIATE_RE.test(text);
 }
 
 /** Minimal sender contract — return value ignored. */

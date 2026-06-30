@@ -105,6 +105,9 @@ function searchableText(value: string): string {
   return value
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
+    // \u0111/\u0110 is a standalone letter (not a combining diacritic) \u2014 fold to "d" so
+    // ASCII patterns match "\u0111\u0103ng nh\u1eadp" -> "dang nhap", "\u0111\u00e3 s\u1eed d\u1ee5ng" -> "da su dung".
+    .replace(/[\u0111\u0110]/g, 'd')
     .toLowerCase();
 }
 
