@@ -11,6 +11,7 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:seed": "tsx scripts/seed.ts",
+    "db:repair-bot-success": "tsx scripts/repair-bot-success-activations.ts",
     "db:generate": "prisma generate",
     "railway:build:api": "pnpm exec prisma generate && pnpm --filter @surfshark/api build",
     "railway:start:api": "pnpm --filter @surfshark/api start",
