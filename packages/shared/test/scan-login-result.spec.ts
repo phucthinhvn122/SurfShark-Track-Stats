@@ -6,6 +6,7 @@ describe('scanLoginResult', () => {
   it('detects Vietnamese success text with or without accents', () => {
     assert.equal(scanLoginResult('Dang nhap thanh cong').status, 'success');
     assert.equal(scanLoginResult('Đăng nhập thành công').status, 'success');
+    assert.equal(scanLoginResult('✅ Đăng nhập thành công với mã: MJKX8Y!').status, 'success');
   });
 
   it('detects Vietnamese failure text with or without accents', () => {

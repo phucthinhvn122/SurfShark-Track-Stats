@@ -19,7 +19,7 @@ import IORedis from 'ioredis';
 import { PrismaClient } from '@prisma/client';
 import { FloodWaitError } from 'telegram/errors';
 import { createDecipheriv, scryptSync } from 'crypto';
-import { scanLoginResult, type StatusResponse } from '@surfshark/shared';
+import { scanLoginResult, type LoginScanStatus, type StatusResponse } from '@surfshark/shared';
 import { SessionPool } from './session-pool';
 
 const HEARTBEAT_KEY = 'worker:heartbeat';
@@ -108,7 +108,10 @@ function searchableText(value: string): string {
     .toLowerCase();
 }
 
-function parseReply(text: string): { ok: boolean; reason?: string } {
+function parseReply(text: string, scanStatus: LoginScanStatus): { ok: boolean; reason?: string } {
+  if (scanStatus === 'failed') return { ok: false, reason: 'failed' };
+  if (scanStatus === 'success') return { ok: true };
+
   // `t` is diacritics-stripped + lowercased, so Vietnamese matches use the
   // ASCII fold ("thất bại" -> "that bai", "hết hạn" -> "het han").
   const t = searchableText(text);
@@ -210,7 +213,7 @@ async function processJob(job: Job<ActivationJob>) {
   const scanResult = scanLoginResult(replyText);
   const scan = { status: scanResult.status, message: scanResult.message };
 
-  const parsed = parseReply(replyText);
+  const parsed = parseReply(replyText, scanResult.status);
   if (!parsed.ok) {
     // 'unexpected' is retryable (parser/transient); definitive 'no' is terminal.
     if (parsed.reason === 'unexpected') throw new Error('TG_UNEXPECTED_REPLY');
