@@ -273,6 +273,13 @@ export class SessionPool {
     }));
   }
 
+  async sendMessage(sessionId: number, message: string): Promise<void> {
+    const s = this.sessions.find((x) => x.id === sessionId);
+    if (!s) throw new Error(`Session #${sessionId} not found`);
+    if (!s.bot) throw new Error(`Session #${sessionId} bot entity not resolved`);
+    await s.client.sendMessage(s.bot as any, { message });
+  }
+
   async disconnectAll(): Promise<void> {
     await Promise.all(this.sessions.map((s) => s.client.disconnect().catch(() => {})));
   }

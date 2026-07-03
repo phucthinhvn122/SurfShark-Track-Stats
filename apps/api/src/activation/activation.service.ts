@@ -86,20 +86,45 @@ export class ActivationService {
         deviceCode: true,
         result: true,
         createdAt: true,
+        sessionMeta: true,
         license: { select: { licenseKey: true, durationDays: true, activatedAt: true, expiredAt: true } },
       },
     });
     if (!act) throw new AppException(ErrorCode.KEY_NOT_FOUND, 'Request not found', HttpStatus.NOT_FOUND);
 
     if (act.result === 'pending') return { state: 'pending' };
-    if (act.result === 'failed')
+    if (act.result === 'failed') {
+      const meta = act.sessionMeta as { error?: { code: string; message: string } } | null;
+      const code = meta?.error?.code;
+      const message = meta?.error?.message ?? 'Activation failed. Please start a new login request.';
+      
+      if (code === 'ERR_BOT_EXPIRED') {
+        return {
+          state: 'expired',
+          error: { code, message },
+        };
+      }
+      if (code === 'ERR_BOT_INVALID' || code === 'ERR_BOT_FAILED' || code === 'ERR_BOT_BANNED') {
+        return {
+          state: 'invalid_code',
+          error: { code, message },
+        };
+      }
+      if (code === 'ERR_TELEGRAM_UNAVAILABLE' || code === 'ERR_TELEGRAM_TIMEOUT') {
+        return {
+          state: 'telegram_unavailable',
+          error: { code, message },
+        };
+      }
+      
       return {
         state: 'server_error',
         error: {
-          code: ErrorCode.INTERNAL,
-          message: 'Activation failed. Please start a new login request.',
+          code: code ?? ErrorCode.INTERNAL,
+          message,
         },
       };
+    }
 
     return {
       state: 'success',
