@@ -5,13 +5,23 @@
 //   - business rules live in one place
 //   - DB calls are parameterised (no SQL injection vector)
 //   - it is trivial to stub in tests
-import { Injectable, HttpStatus } from '@nestjs/common';
-import type { License } from '@prisma/client';
+import { Injectable, HttpStatus, Logger } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
 import { AppException } from '../common/app-exception';
 import { ErrorCode } from '@surfshark/shared';
 
 const DAY_MS = 86_400_000;
+type License = {
+  id: string;
+  licenseKey: string;
+  username: string | null;
+  status: 'unused' | 'active' | 'expired' | 'banned';
+  durationDays: number;
+  notes: string | null;
+  createdAt: Date;
+  activatedAt: Date | null;
+  expiredAt: Date | null;
+};
 
 export type ReservationContext = {
   requestId: string;
@@ -24,6 +34,8 @@ export type ReservationContext = {
 
 @Injectable()
 export class LicenseService {
+  private readonly logger = new Logger(LicenseService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   async findByKey(licenseKey: string): Promise<License | null> {
@@ -136,12 +148,20 @@ export class LicenseService {
       });
     } catch (e) {
       if (e instanceof AppException) throw e;
-      throw new AppException(
-        ErrorCode.VALIDATION,
-        'Activation already in progress for this request',
-        HttpStatus.CONFLICT,
-      );
+      this.logger.error(`[activation:${ctx.requestId}] reserve failed: ${(e as Error).message}`);
+      throw new AppException(ErrorCode.INTERNAL, 'Could not reserve activation request', HttpStatus.INTERNAL_SERVER_ERROR);
     }
+  }
+
+  async failReservedActivation(requestId: string, reason: string): Promise<void> {
+    const updated = await this.prisma.activation.updateMany({
+      where: { requestId, result: 'pending' },
+      data: {
+        result: 'failed',
+        sessionMeta: { enqueueFailure: reason },
+      },
+    });
+    this.logger.warn(`[activation:${requestId}] marked failed after enqueue/status failure count=${updated.count}`);
   }
 
   /** Hourly cron: flip active keys whose 30-day window has passed to `expired`. */

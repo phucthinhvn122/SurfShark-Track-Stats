@@ -1,7 +1,8 @@
 // apps/api/src/admin/queries.service.ts
 import { Injectable } from '@nestjs/common';
-import { LicenseStatus } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
+
+type LicenseStatus = 'unused' | 'active' | 'expired' | 'banned';
 
 /** Read-only listings for the admin panel: keys, users, logs. */
 @Injectable()

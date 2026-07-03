@@ -72,7 +72,15 @@ export const settingsUpdateSchema = z
   .strict(); // reject unknown fields — prevents arbitrary column writes
 export type SettingsUpdateInput = z.infer<typeof settingsUpdateSchema>;
 
-export type ActivationState = 'processing' | 'success' | 'failed';
+export type ActivationState =
+  | 'pending'
+  | 'processing'
+  | 'success'
+  | 'expired'
+  | 'invalid_code'
+  | 'telegram_unavailable'
+  | 'server_error'
+  | 'failed';
 
 export interface StatusResponse {
   state: ActivationState;
@@ -100,6 +108,7 @@ export const ErrorCode = {
   KEY_OUT_OF_USES: 'ERR_KEY_OUT_OF_USES',
   DEVICE_CODE_UNAVAILABLE: 'ERR_DEVICE_CODE_UNAVAILABLE',
   TELEGRAM_UNAVAILABLE: 'ERR_TELEGRAM_UNAVAILABLE',
+  TELEGRAM_TIMEOUT: 'ERR_TELEGRAM_TIMEOUT',
   TELEGRAM_RATE_LIMITED: 'ERR_TELEGRAM_RATE_LIMITED',
   // Telegram round-trip succeeded but the bot reply didn't match any known
   // pattern — a parser-drift problem, NOT a Telegram outage.

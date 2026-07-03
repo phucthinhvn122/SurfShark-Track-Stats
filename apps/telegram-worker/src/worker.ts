@@ -16,11 +16,12 @@
 import * as Sentry from '@sentry/node';
 import { Worker, Queue, Job } from 'bullmq';
 import IORedis from 'ioredis';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { FloodWaitError } from 'telegram/errors';
 import { createDecipheriv, scryptSync } from 'crypto';
 import { scanLoginResult, type LoginScanStatus, type StatusResponse } from '@surfshark/shared';
 import { SessionPool } from './session-pool';
+import { mapBotFailureStatus, mapCommitFailureStatus, mapExhaustedJobError } from './status-mapping';
 
 const HEARTBEAT_KEY = 'worker:heartbeat';
 const SESSIONS_KEY = 'worker:sessions';
@@ -132,6 +133,9 @@ function parseReply(text: string, scanStatus: LoginScanStatus): { ok: boolean; r
 }
 
 async function writeStatus(requestId: string, status: StatusResponse) {
+  console.log(
+    `[activation:${requestId}] status=${status.state}${status.error?.code ? ` code=${status.error.code}` : ''}`,
+  );
   await connection.set(`status:${requestId}`, JSON.stringify(status), 'EX', 3600);
 }
 
@@ -146,8 +150,8 @@ async function failAlreadySent(requestId: string) {
   });
 }
 
-async function commitLicenseActivation(licenseKey: string) {
-  return prisma.$transaction(async (tx) => {
+async function commitLicenseActivation(licenseKey: string, requestId: string) {
+  return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     const locked = await tx.$queryRaw<Array<{ id: string; status: string; duration_days: number }>>`
       SELECT id, status, duration_days FROM licenses WHERE license_key = ${licenseKey} FOR UPDATE`;
     const row = locked[0];
@@ -159,16 +163,25 @@ async function commitLicenseActivation(licenseKey: string) {
     const activatedAt = new Date();
     const expiredAt = new Date(activatedAt.getTime() + row.duration_days * DAY);
     const status = row.duration_days === 0 ? 'expired' : 'active';
-    return tx.license.update({
+    const license = await tx.license.update({
       where: { licenseKey },
       data: { status, activatedAt, expiredAt },
     });
+
+    const activation = await tx.activation.updateMany({
+      where: { requestId, result: 'pending' },
+      data: { result: 'success', licenseId: license.id },
+    });
+    if (activation.count !== 1) throw new Error('ERR_ACTIVATION_NOT_PENDING');
+
+    return license;
   });
 }
 
 // ---------- the job processor ----------
 async function processJob(job: Job<ActivationJob>) {
   const { requestId, deviceCode, licenseKey } = job.data;
+  console.log(`[activation:${requestId}] picked job device=${maskDeviceCode(deviceCode)} license=${maskKey(licenseKey)}`);
 
   // Idempotency — FIX (audit): a retry/duplicate must not re-commit. Skip if the
   // activation already reached a terminal state.
@@ -191,6 +204,7 @@ async function processJob(job: Job<ActivationJob>) {
     return;
   }
   await prisma.telegramLog.create({ data: { action: 'login', request: maskedCommand, status: 'sent' } });
+  console.log(`[activation:${requestId}] sent ${maskedCommand}`);
 
   let replyText: string;
   let sessionId: number;
@@ -209,6 +223,7 @@ async function processJob(job: Job<ActivationJob>) {
   await prisma.telegramLog.create({
     data: { action: 'login', request: maskedCommand, response: `[s${sessionId}] ${replyText}`, status: 'received' },
   });
+  console.log(`[activation:${requestId}] received reply session=${sessionId} raw="${replyText.slice(0, 120)}"`);
 
   // Scan the bot reply into a friendly ✅/❌/⚠️ summary that rides along on the
   // status the web page polls — so the user sees the outcome right where they
@@ -221,28 +236,20 @@ async function processJob(job: Job<ActivationJob>) {
     // 'unexpected' is retryable (parser/transient); definitive 'no' is terminal.
     if (parsed.reason === 'unexpected') throw new Error('TG_UNEXPECTED_REPLY');
     await prisma.activation.update({ where: { requestId }, data: { result: 'failed' } });
-    await writeStatus(requestId, {
-      state: 'failed',
-      scan,
-      error: { code: `ERR_BOT_${parsed.reason?.toUpperCase()}`, message: replyText },
-    });
+    await writeStatus(requestId, mapBotFailureStatus(parsed.reason, replyText, scan));
     return;
   }
 
   let license;
   try {
-    license = await commitLicenseActivation(licenseKey);
+    license = await commitLicenseActivation(licenseKey, requestId);
   } catch (err: any) {
     await prisma.activation.update({ where: { requestId }, data: { result: 'failed' } });
-    await writeStatus(requestId, {
-      state: 'failed',
-      scan,
-      error: { code: err.message || 'ERR_KEY_IN_USE', message: 'License key is no longer available' },
-    });
+    console.error(`[activation:${requestId}] commit failed after telegram success:`, err.message);
+    await writeStatus(requestId, mapCommitFailureStatus(err, scan));
     return;
   }
 
-  await prisma.activation.update({ where: { requestId }, data: { result: 'success', licenseId: license.id } });
   await writeStatus(requestId, {
     state: 'success',
     scan,
@@ -252,6 +259,7 @@ async function processJob(job: Job<ActivationJob>) {
     activatedAt: license.activatedAt?.toISOString(),
     expiredAt: license.expiredAt?.toISOString(),
   });
+  console.log(`[activation:${requestId}] committed success license=${maskKey(license.licenseKey)}`);
 }
 
 // ---------- boot ----------
@@ -305,11 +313,7 @@ async function main() {
       // Don't blame Telegram for every exhausted job: a reply the parser didn't
       // recognise rode through fine — it's parser drift, not an outage. Map the
       // thrown marker to the right code so the user sees the real cause.
-      const error =
-        err.message === 'TG_UNEXPECTED_REPLY'
-          ? { code: 'ERR_BOT_UNRECOGNIZED', message: 'The bot replied in an unrecognised format. We are looking into it.' }
-          : { code: 'ERR_TELEGRAM_UNAVAILABLE', message: 'Activation service temporarily unavailable' };
-      await writeStatus(job.data.requestId, { state: 'failed', error });
+      await writeStatus(job.data.requestId, mapExhaustedJobError(err));
     }
   });
 

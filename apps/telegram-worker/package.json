@@ -7,7 +7,8 @@
     "start:prod": "node dist/worker.js",
     "session": "tsx src/generate-session.ts",
     "typecheck": "tsc --noEmit",
-    "build": "tsc"
+    "build": "tsc",
+    "test": "tsx --test src/*.spec.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.14.0",

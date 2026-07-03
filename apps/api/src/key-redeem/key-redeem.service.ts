@@ -43,8 +43,6 @@ export class KeyRedeemService {
       this.logger.warn(`redeem rejected key=${maskedKey} reason=${keyCheck.code}`);
       return { success: false, code: keyCheck.code, message: keyCheck.message };
     }
-    const license = keyCheck.license;
-
     // 2. Pull the current device code from the Surfshark app.
     let deviceCode: string;
     try {
@@ -54,10 +52,29 @@ export class KeyRedeemService {
       return { success: false, code: 'device_code_unavailable', message: (e as Error).message };
     }
 
-    // 3. Send the command and await the bot reply.
+    try {
+      await this.keys.reserveRedeem(input.key, {
+        requestId,
+        deviceCode,
+        ipAddress: meta.ip,
+        country: meta.country,
+        device: meta.ua,
+      });
+      this.logger.log(`redeem reserved requestId=${requestId} key=${maskedKey} device=${maskDeviceCode(deviceCode)}`);
+    } catch (e) {
+      const mapped = mapRedeemDbError(e);
+      this.logger.warn(`redeem reserve rejected requestId=${requestId} key=${maskedKey} code=${mapped.code}`);
+      return mapped;
+    }
+
+    // 3. Send the command and await the bot reply. Reservation above prevents a
+    // duplicate/concurrent request from sending a second Telegram command.
     const tg = await this.telegram.sendLoginCommand({ deviceCode });
     if (!tg.ok) {
       this.logger.warn(`redeem tg-failed key=${maskedKey} code=${tg.code} attempts=${tg.attempts}`);
+      await this.keys.markRedeemFailed(requestId, tg.code).catch((e) => {
+        this.logger.error(`redeem failed to mark tg failure requestId=${requestId}: ${(e as Error).message}`);
+      });
       return {
         success: false,
         code: tg.code,
@@ -66,10 +83,9 @@ export class KeyRedeemService {
       };
     }
 
-    // 4. Commit: flip the license to `active` and persist the activation row.
+    // 4. Commit: flip the license and activation row atomically.
     try {
-      const updated = await this.keys.consume(license.licenseKey, requestId);
-      await this.keys.recordActivation(updated.id, requestId, deviceCode, meta);
+      const updated = await this.keys.commitReservedRedeem(input.key, requestId);
       this.logger.log(`redeem success key=${maskedKey} licenseId=${updated.id}`);
       return {
         success: true,
@@ -81,7 +97,24 @@ export class KeyRedeemService {
       };
     } catch (e) {
       this.logger.error(`redeem commit failed key=${maskedKey}: ${(e as Error).message}`);
+      await this.keys.markRedeemFailed(requestId, (e as Error).message).catch((markError) => {
+        this.logger.error(`redeem failed to mark commit failure requestId=${requestId}: ${(markError as Error).message}`);
+      });
       return { success: false, code: 'internal_error', message: 'Could not commit activation' };
     }
   }
+}
+
+function mapRedeemDbError(err: unknown): RedeemResult {
+  const response = typeof (err as { getResponse?: unknown }).getResponse === 'function'
+    ? ((err as { getResponse: () => unknown }).getResponse() as { error?: { code?: string; message?: string } })
+    : null;
+  const code = response?.error?.code;
+  const message = response?.error?.message ?? (err instanceof Error ? err.message : 'Could not reserve key');
+
+  if (code === 'ERR_KEY_NOT_FOUND') return { success: false, code: 'invalid_key', message };
+  if (code === 'ERR_KEY_BANNED') return { success: false, code: 'key_banned', message };
+  if (code === 'ERR_KEY_EXPIRED') return { success: false, code: 'key_expired', message };
+  if (code === 'ERR_KEY_IN_USE') return { success: false, code: 'key_in_use', message };
+  return { success: false, code: 'internal_error', message };
 }

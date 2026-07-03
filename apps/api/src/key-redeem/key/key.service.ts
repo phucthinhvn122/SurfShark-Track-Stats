@@ -3,10 +3,21 @@
 // All DB access for license keys used by the key-redeem flow.
 // Single responsibility: validate and (atomically) consume a license key.
 import { Injectable, HttpStatus } from '@nestjs/common';
-import type { License } from '@prisma/client';
 import { PrismaService } from '../../common/prisma.service';
 import { AppException } from '../../common/app-exception';
 import { ErrorCode, type RedeemResultCode } from '@surfshark/shared';
+
+type License = {
+  id: string;
+  licenseKey: string;
+  username: string | null;
+  status: 'unused' | 'active' | 'expired' | 'banned';
+  durationDays: number;
+  notes: string | null;
+  createdAt: Date;
+  activatedAt: Date | null;
+  expiredAt: Date | null;
+};
 
 export interface KeyCheckResult {
   valid: boolean;
@@ -14,6 +25,14 @@ export interface KeyCheckResult {
   message: string;
   license: License | null;
   remainingUses?: number;
+}
+
+export interface RedeemReservationContext {
+  requestId: string;
+  deviceCode: string;
+  ipAddress?: string;
+  country?: string;
+  device?: string;
 }
 
 @Injectable()
@@ -87,6 +106,91 @@ export class KeyService {
   }
 
   /** Persist a requestId → activation row so the admin "users" view shows it. */
+  async reserveRedeem(licenseKey: string, ctx: RedeemReservationContext): Promise<License> {
+    return this.prisma.$transaction(async (tx) => {
+      const rows = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM licenses WHERE license_key = ${this.normalizeKey(licenseKey)} FOR UPDATE`;
+      const row = rows[0];
+      if (!row) throw new AppException(ErrorCode.KEY_NOT_FOUND, 'Key not found', HttpStatus.NOT_FOUND);
+
+      const license = await tx.license.findUnique({ where: { id: row.id } });
+      if (!license) throw new AppException(ErrorCode.KEY_NOT_FOUND, 'Key not found', HttpStatus.NOT_FOUND);
+
+      let fresh = license;
+      if (fresh.status === 'active' && fresh.expiredAt && fresh.expiredAt.getTime() <= Date.now()) {
+        fresh = await tx.license.update({ where: { id: fresh.id }, data: { status: 'expired' } });
+      }
+      if (fresh.status === 'banned') throw new AppException(ErrorCode.KEY_BANNED, 'Key has been banned', HttpStatus.FORBIDDEN);
+      if (fresh.status === 'expired') throw new AppException(ErrorCode.KEY_EXPIRED, 'Key has expired', HttpStatus.FORBIDDEN);
+      if (fresh.status === 'active') throw new AppException(ErrorCode.KEY_IN_USE, 'Key is already in use', HttpStatus.CONFLICT);
+
+      const pending = await tx.activation.findFirst({
+        where: { licenseId: fresh.id, result: 'pending' },
+        select: { id: true },
+      });
+      if (pending) throw new AppException(ErrorCode.KEY_IN_USE, 'Key redemption is already in progress', HttpStatus.CONFLICT);
+
+      await tx.activation.create({
+        data: {
+          requestId: ctx.requestId,
+          licenseId: fresh.id,
+          deviceCode: ctx.deviceCode,
+          ipAddress: ctx.ipAddress,
+          country: ctx.country,
+          device: ctx.device,
+          result: 'pending',
+        },
+      });
+
+      return fresh;
+    });
+  }
+
+  async commitReservedRedeem(licenseKey: string, requestId: string): Promise<License> {
+    return this.prisma.$transaction(async (tx) => {
+      const rows = await tx.$queryRaw<Array<{ id: string; status: string; duration_days: number }>>`
+        SELECT id, status, duration_days FROM licenses
+        WHERE license_key = ${this.normalizeKey(licenseKey)} FOR UPDATE`;
+      const row = rows[0];
+      if (!row) throw new AppException(ErrorCode.KEY_NOT_FOUND, 'Key not found', HttpStatus.NOT_FOUND);
+      if (row.status !== 'unused') {
+        throw new AppException(
+          ErrorCode.KEY_IN_USE,
+          `Key is not available (status=${row.status})`,
+          HttpStatus.CONFLICT,
+        );
+      }
+
+      const activatedAt = new Date();
+      const expiredAt = row.duration_days === 0 ? activatedAt : new Date(activatedAt.getTime() + row.duration_days * 86_400_000);
+      const status = row.duration_days === 0 ? 'expired' : 'active';
+      const updated = await tx.license.update({
+        where: { id: row.id },
+        data: { status, activatedAt, expiredAt },
+      });
+
+      const activation = await tx.activation.updateMany({
+        where: { requestId, licenseId: row.id, result: 'pending' },
+        data: { result: 'success' },
+      });
+      if (activation.count !== 1) {
+        throw new AppException(ErrorCode.KEY_IN_USE, 'Redemption request is not pending', HttpStatus.CONFLICT);
+      }
+
+      return updated;
+    });
+  }
+
+  async markRedeemFailed(requestId: string, reason: string): Promise<void> {
+    await this.prisma.activation.updateMany({
+      where: { requestId, result: 'pending' },
+      data: {
+        result: 'failed',
+        sessionMeta: { redeemFailure: reason },
+      },
+    });
+  }
+
   async recordActivation(licenseId: string, requestId: string, deviceCode: string, meta: { ip?: string; country?: string; ua?: string }): Promise<void> {
     await this.prisma.activation.create({
       data: {

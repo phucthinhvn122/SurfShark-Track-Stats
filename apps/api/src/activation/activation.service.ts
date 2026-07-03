@@ -1,5 +1,5 @@
 // apps/api/src/activation/activation.service.ts
-import { Injectable, HttpStatus } from '@nestjs/common';
+import { Injectable, HttpStatus, Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../common/prisma.service';
 import { ActivationQueueService } from '../telegram/activation-queue.service';
@@ -10,6 +10,8 @@ import { ErrorCode, type DeviceLoginInput, type StatusResponse } from '@surfshar
 
 @Injectable()
 export class ActivationService {
+  private readonly logger = new Logger(ActivationService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly licenses: LicenseService,
@@ -26,6 +28,9 @@ export class ActivationService {
     const sessionMeta = Object.fromEntries(
       Object.entries({ ip: meta.ip, country: meta.country, ua: meta.ua }).filter(([, v]) => v != null),
     );
+    this.logger.log(
+      `[activation:${requestId}] reserving license=${maskKey(input.license)} device=${maskDeviceCode(input.deviceCode)} ip=${meta.ip ?? '-'}`,
+    );
     await this.licenses.reserveActivation(input.license, {
       requestId,
       deviceCode: input.deviceCode,
@@ -35,10 +40,38 @@ export class ActivationService {
       sessionMeta,
     });
 
-    await this.status.set(requestId, { state: 'processing' });
-    await this.queue.enqueue({ requestId, deviceCode: input.deviceCode, licenseKey: input.license });
+    try {
+      await this.queue.enqueue({ requestId, deviceCode: input.deviceCode, licenseKey: input.license });
+      this.logger.log(`[activation:${requestId}] queued telegram login job jobId=${requestId}`);
+    } catch (e) {
+      const message = (e as Error).message;
+      this.logger.error(`[activation:${requestId}] enqueue failed jobId=${requestId}: ${message}`);
+      await this.licenses.failReservedActivation(requestId, message).catch((markError) => {
+        this.logger.error(`[activation:${requestId}] failed to mark activation failed: ${(markError as Error).message}`);
+      });
+      await this.status
+        .set(requestId, {
+          state: 'server_error',
+          error: {
+            code: ErrorCode.INTERNAL,
+            message: 'Activation could not be queued. Please start a new login request.',
+          },
+        })
+        .catch((statusError) => {
+          this.logger.warn(`[activation:${requestId}] could not write enqueue-failure status: ${(statusError as Error).message}`);
+        });
+      throw new AppException(
+        ErrorCode.INTERNAL,
+        'Activation could not be queued. Please start a new login request.',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
 
-    return { requestId, state: 'processing' as const };
+    await this.status.set(requestId, { state: 'pending' }).catch((e) => {
+      this.logger.warn(`[activation:${requestId}] queued but could not write pending status: ${(e as Error).message}`);
+    });
+
+    return { requestId, state: 'pending' as const };
   }
 
   /** Polled by the frontend until the state is terminal. */
@@ -58,9 +91,15 @@ export class ActivationService {
     });
     if (!act) throw new AppException(ErrorCode.KEY_NOT_FOUND, 'Request not found', HttpStatus.NOT_FOUND);
 
-    if (act.result === 'pending') return { state: 'processing' };
+    if (act.result === 'pending') return { state: 'pending' };
     if (act.result === 'failed')
-      return { state: 'failed', error: { code: ErrorCode.INTERNAL, message: 'Login failed' } };
+      return {
+        state: 'server_error',
+        error: {
+          code: ErrorCode.INTERNAL,
+          message: 'Activation failed. Please start a new login request.',
+        },
+      };
 
     return {
       state: 'success',
@@ -71,4 +110,14 @@ export class ActivationService {
       expiredAt: act.license?.expiredAt?.toISOString(),
     };
   }
+}
+
+function maskKey(k: string, visible = 4): string {
+  if (k.length <= visible * 2) return '*'.repeat(k.length);
+  return `${k.slice(0, visible)}${'*'.repeat(k.length - visible * 2)}${k.slice(-visible)}`;
+}
+
+function maskDeviceCode(c: string): string {
+  if (c.length <= 4) return '*'.repeat(c.length);
+  return `${c.slice(0, 2)}${'*'.repeat(c.length - 4)}${c.slice(-2)}`;
 }

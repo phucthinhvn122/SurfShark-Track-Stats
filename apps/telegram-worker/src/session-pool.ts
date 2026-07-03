@@ -30,6 +30,11 @@ interface PooledSession {
   chain: Promise<unknown>;
 }
 
+function extractDeviceCode(command: string): string | null {
+  const match = command.match(/^\/login\s+([A-Z0-9]{6})\b/i);
+  return match?.[1]?.toUpperCase() ?? null;
+}
+
 export class SessionPool {
   private sessions: PooledSession[] = [];
   private rr = 0;
@@ -40,12 +45,11 @@ export class SessionPool {
     private readonly apiHash: string,
     private readonly botUsername: string,
     private readonly sessionStrings: string[],
-    private readonly replyTimeoutMs = 25_000,
-    // Hard cap across all messages of one send: the bot acks with a transient
-    // "⏳ Đang xử lý…" placeholder before the real result, so we may wait through
-    // several messages. This bounds the total wait so a bot stuck emitting only
-    // placeholders still eventually times out and lets the chain advance.
-    private readonly maxReplyWaitMs = 90_000,
+    private readonly replyTimeoutMs = 60_000,
+    // Hard cap across all messages of one send. Some bot runs return only the
+    // final result and can take longer than 25s, so the first reply gets the
+    // full deadline before per-message inactivity limits apply.
+    private readonly maxReplyWaitMs = 120_000,
   ) {}
 
   /** Connect every session and resolve the bot entity once per session. */
@@ -169,10 +173,13 @@ export class SessionPool {
   private collectReply(s: PooledSession, command: string): Promise<string> {
     return new Promise<string>((resolve, reject) => {
       const filter = new NewMessage({ incoming: true });
+      const expectedCode = extractDeviceCode(command);
       const deadline = Date.now() + this.maxReplyWaitMs;
+      let sawBotMessage = false;
       let timer: ReturnType<typeof setTimeout>;
       const arm = () => {
-        const remaining = Math.max(0, Math.min(this.replyTimeoutMs, deadline - Date.now()));
+        const windowMs = sawBotMessage ? this.replyTimeoutMs : this.maxReplyWaitMs;
+        const remaining = Math.max(0, Math.min(windowMs, deadline - Date.now()));
         timer = setTimeout(() => {
           cleanup();
           reject(new Error('TG_TIMEOUT'));
@@ -180,8 +187,17 @@ export class SessionPool {
       };
       const handler = (event: NewMessageEvent) => {
         const senderId = event.message.senderId?.toString();
-        if (!senderId || !s.botId || senderId !== s.botId) return;
         const text = event.message.message ?? '';
+        const fromBot = Boolean(senderId && s.botId && senderId === s.botId);
+        const mentionsExpectedCode = Boolean(expectedCode && text.toUpperCase().includes(expectedCode));
+        if (!fromBot && !mentionsExpectedCode) return;
+        if (!fromBot && mentionsExpectedCode) {
+          // Some Telegram updates do not expose the expected bot sender metadata.
+          // A code-bearing reply is still the result for this serialized command.
+          // eslint-disable-next-line no-console
+          console.warn(`Session #${s.id}: accepting bot reply by device-code match`);
+        }
+        sawBotMessage = true;
         // Skip the placeholder ack and keep waiting for the real result, as long
         // as we're still within the absolute deadline.
         if (isIntermediateReply(text) && Date.now() < deadline) {
