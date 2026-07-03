@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { LayoutDashboard, KeyRound, Users, ScrollText, Settings, LogOut, ShieldCheck } from 'lucide-react';
+import { KeyRound, LayoutDashboard, LogOut, ScrollText, Settings, ShieldCheck, Users } from 'lucide-react';
 
 const NAV = [
   { href: '/admin/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -27,9 +27,17 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     else setAuthed(true);
   }, [isLogin, router]);
 
-  // login page renders without the shell
   if (isLogin) return <>{children}</>;
-  if (!authed) return <main className="p-10 text-muted">Authenticating…</main>;
+  if (!authed) {
+    return (
+      <main className="page-shell">
+        <div className="glass max-w-sm p-5 text-sm text-muted">
+          <div className="skeleton mb-4 h-4 w-32" />
+          Authenticating...
+        </div>
+      </main>
+    );
+  }
 
   function logout() {
     sessionStorage.removeItem('admin_token');
@@ -37,35 +45,53 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   }
 
   return (
-    <div className="md:grid md:grid-cols-[240px_1fr] min-h-screen">
-      <aside className="bg-surface border-b md:border-b-0 md:border-r border-white/10 p-4 flex md:flex-col gap-2 md:sticky md:top-0 md:h-screen">
-        <div className="flex items-center gap-2 font-extrabold px-2 mb-2 md:mb-4">
-          <span className="grid place-items-center w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-secondary">
-            <ShieldCheck size={18} />
-          </span>
-          Admin
+    <div className="min-h-screen md:grid md:grid-cols-[232px_1fr]">
+      <aside className="sticky top-0 z-20 border-b border-white/10 bg-bg/95 px-3 py-3 backdrop-blur md:h-screen md:border-b-0 md:border-r md:bg-surface/70 md:p-4">
+        <div className="flex items-center justify-between gap-3 md:block">
+          <div className="flex items-center gap-2.5 px-1 text-base font-extrabold md:mb-5">
+            <span className="grid h-9 w-9 place-items-center rounded-lg bg-cyan-400 text-zinc-950">
+              <ShieldCheck size={18} />
+            </span>
+            Admin
+          </div>
+          <button
+            onClick={logout}
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-red-400/20 bg-red-400/10 px-3 text-sm font-semibold text-red-200 transition hover:bg-red-400/15 md:hidden"
+          >
+            <LogOut size={16} />
+            Sign out
+          </button>
         </div>
-        <nav className="flex md:flex-col gap-1 flex-1 flex-wrap">
+
+        <nav className="mt-3 flex gap-1 overflow-x-auto md:mt-0 md:flex-col md:overflow-visible">
           {NAV.map(({ href, label, icon: Icon }) => {
             const active = pathname === href;
             return (
               <Link
                 key={href}
                 href={href}
-                className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-sm font-medium transition ${
-                  active ? 'bg-primary/20 border border-secondary/30 text-white' : 'text-muted hover:bg-white/5 hover:text-white'
+                className={`inline-flex min-h-10 shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                  active
+                    ? 'border border-cyan-300/25 bg-cyan-300/10 text-cyan-100'
+                    : 'text-muted hover:bg-white/[.05] hover:text-white'
                 }`}
               >
-                <Icon size={17} /> {label}
+                <Icon size={17} />
+                {label}
               </Link>
             );
           })}
         </nav>
-        <button onClick={logout} className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-sm font-semibold bg-red-500/10 border border-red-500/25 text-red-400 hover:bg-red-500/20">
-          <LogOut size={16} /> Sign out
+
+        <button
+          onClick={logout}
+          className="mt-4 hidden w-full items-center gap-2 rounded-lg border border-red-400/20 bg-red-400/10 px-3 py-2.5 text-sm font-semibold text-red-200 transition hover:bg-red-400/15 md:flex"
+        >
+          <LogOut size={16} />
+          Sign out
         </button>
       </aside>
-      <main className="overflow-y-auto">{children}</main>
+      <main className="min-w-0">{children}</main>
     </div>
   );
 }

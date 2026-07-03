@@ -2,8 +2,7 @@
 'use client';
 import { use } from 'react';
 import Link from 'next/link';
-import { motion } from 'framer-motion';
-import { CheckCircle2, XCircle } from 'lucide-react';
+import { CheckCircle2, Clock3, Loader2, XCircle } from 'lucide-react';
 import { useStatus } from '../../../hooks/queries';
 
 const STEPS = ['Validating device code', 'Queuing login job', 'Sending /login command to Surfshark Bot', 'Parsing bot response', 'Finalizing'];
@@ -12,74 +11,133 @@ export default function StatusPage({ params }: { params: Promise<{ requestId: st
   const { requestId } = use(params);
   const { data, isError } = useStatus(requestId);
 
-  // processing
-  if (!data || data.state === 'processing') {
+  if (!isError && (!data || data.state === 'pending' || data.state === 'processing')) {
     return (
-      <main className="max-w-md mx-auto px-6 py-20 text-center">
-        <div className="glass p-10">
-          <div className="w-14 h-14 mx-auto rounded-full border-[3px] border-white/10 border-t-secondary animate-spin" />
-          <h3 className="mt-5 font-bold">Contacting Telegram service…</h3>
-          <ul className="mt-5 text-left flex flex-col gap-2 text-sm text-muted">
-            {STEPS.map((s) => <li key={s}>• {s}</li>)}
+      <main className="mx-auto w-full max-w-lg px-4 py-10 text-center sm:px-6 sm:py-16">
+        <div className="glass p-6 sm:p-8">
+          <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-cyan-300/10 text-cyan-300">
+            <Loader2 className="animate-spin" size={28} />
+          </div>
+          <h1 className="mt-5 text-2xl font-extrabold">Waiting for Telegram confirmation...</h1>
+          <p className="mt-2 text-sm leading-6 text-muted">Keep this page open while the activation result is processed.</p>
+          <ul className="mt-6 space-y-2 text-left text-sm text-muted">
+            {STEPS.map((step) => (
+              <li key={step} className="flex items-center gap-3 rounded-lg bg-white/[.04] p-3">
+                <Clock3 className="shrink-0 text-cyan-300" size={16} />
+                {step}
+              </li>
+            ))}
           </ul>
         </div>
       </main>
     );
   }
 
-  // failed
-  if (data.state === 'failed' || isError) {
+  if (isError || (data && data.state !== 'success')) {
+    const detail = describeFailure(data);
     return (
-      <main className="max-w-md mx-auto px-6 py-20 text-center">
-        <div className="glass p-10">
-          <XCircle className="mx-auto text-red-400" size={56} />
-          <h2 className="mt-4 text-2xl font-extrabold">{data.scan?.message ?? 'Login failed'}</h2>
-          <p className="text-muted mt-2">{data.error?.message ?? 'Something went wrong.'}</p>
-          {data.error?.code && <code className="inline-block mt-3 text-xs bg-white/5 px-2 py-1 rounded">{data.error.code}</code>}
-          <div className="mt-6 flex gap-3">
-            <Link href="/login" className="btn-primary flex-1">Try again</Link>
-            <Link href="/" className="btn-ghost flex-1">Home</Link>
+      <main className="mx-auto w-full max-w-lg px-4 py-10 text-center sm:px-6 sm:py-16">
+        <div className="glass p-6 sm:p-8">
+          <XCircle className="mx-auto text-red-300" size={58} />
+          <h1 className="mt-4 text-2xl font-extrabold">{detail.title}</h1>
+          <p className="mt-2 text-sm leading-6 text-muted">{detail.message}</p>
+          {detail.code && (
+            <code className="mt-4 inline-block rounded-lg border border-white/10 bg-white/[.04] px-3 py-1.5 text-xs text-red-200">
+              {detail.code}
+            </code>
+          )}
+          <div className="mt-6 grid gap-3 sm:grid-cols-2">
+            <Link href="/login" className="btn-primary">
+              Try again
+            </Link>
+            <Link href="/" className="btn-ghost">
+              Home
+            </Link>
           </div>
         </div>
       </main>
     );
   }
 
-  // success
   return (
-    <main className="max-w-lg mx-auto px-6 py-16">
-      <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} className="glass p-8">
+    <main className="mx-auto w-full max-w-xl px-4 py-10 sm:px-6 sm:py-14">
+      <div className="glass p-5 sm:p-8">
         <div className="text-center">
-          <CheckCircle2 className="mx-auto text-green-400" size={64} />
-          <h2 className="mt-3 text-2xl font-extrabold">{data.scan?.message ?? "You're protected"}</h2>
+          <div className="relative mx-auto inline-flex h-20 w-20 items-center justify-center">
+            <div className="absolute inset-0 animate-ping rounded-full bg-emerald-400/20"></div>
+            <div className="relative flex h-full w-full items-center justify-center rounded-full bg-emerald-400/10 shadow-[0_0_30px_rgba(52,211,153,0.2)]">
+              <CheckCircle2 className="text-emerald-400" size={40} />
+            </div>
+          </div>
+          <h1 className="mt-5 text-2xl font-extrabold tracking-tight">{data.scan?.message ?? "You're protected"}</h1>
+          <p className="mt-2 text-sm leading-6 text-muted">Your device has been successfully activated.</p>
         </div>
-        <div className="mt-6 grid grid-cols-2 gap-px bg-white/10 rounded-xl overflow-hidden border border-white/10">
-          <Cell label="Device code" value={maskCode(data.deviceCode)} />
-          <Cell label="License key" value={maskKey(data.licenseKey)} />
-          <Cell label="Plan" value={planLabel(data.durationDays)} />
-          <Cell label="Expires" value={fmt(data.expiredAt)} />
+        
+        <div className="mt-8 overflow-hidden rounded-xl border border-white/10 bg-white/[.02]">
+          <div className="border-b border-white/5 bg-white/[.02] px-4 py-3 flex items-center justify-between">
+            <span className="text-sm font-medium text-white/80">Activation Details</span>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-400/10 px-2 py-0.5 text-xs font-medium text-emerald-400">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400"></span>
+              Active
+            </span>
+          </div>
+          <div className="grid sm:grid-cols-2">
+            <Cell label="Device code" value={maskCode(data.deviceCode)} />
+            <Cell label="License key" value={maskKey(data.licenseKey)} />
+            <Cell label="Plan" value={planLabel(data.durationDays)} />
+            <Cell label="Expires" value={fmt(data.expiredAt)} />
+          </div>
         </div>
-        <Link href="/" className="btn-primary w-full mt-6">Done</Link>
-      </motion.div>
+
+        <div className="mt-6 rounded-xl border border-cyan-500/10 bg-cyan-500/[.03] p-5 text-left text-sm text-cyan-200/70">
+          <p className="font-semibold text-cyan-100 flex items-center gap-2">
+            <CheckCircle2 size={16} className="text-cyan-400" />
+            What's next?
+          </p>
+          <ul className="mt-3 space-y-2 text-xs leading-relaxed">
+            <li className="flex gap-2">
+              <span className="text-cyan-500">•</span>
+              Return to your TV or device where you started the login.
+            </li>
+            <li className="flex gap-2">
+              <span className="text-cyan-500">•</span>
+              It should automatically refresh and log you in within a few seconds.
+            </li>
+            <li className="flex gap-2">
+              <span className="text-cyan-500">•</span>
+              If it doesn't connect immediately, try restarting the Surfshark app.
+            </li>
+          </ul>
+        </div>
+
+        <Link href="/" className="btn-primary mt-8 w-full shadow-[0_0_20px_rgba(6,182,212,0.2)]">
+          Done
+        </Link>
+      </div>
     </main>
   );
 }
 
 function Cell({ label, value }: { label: string; value?: string }) {
   return (
-    <div className="bg-surface p-4">
-      <div className="text-xs text-muted">{label}</div>
-      <b className="text-base break-all font-mono">{value ?? '—'}</b>
+    <div className="border-b border-white/10 bg-white/[.03] p-4 last:border-b-0 sm:border-r sm:[&:nth-child(2n)]:border-r-0 sm:[&:nth-last-child(-n+2)]:border-b-0">
+      <div className="text-xs font-semibold uppercase tracking-wide text-muted">{label}</div>
+      <b className="mt-1 block break-all font-mono text-base text-white">{value ?? '-'}</b>
     </div>
   );
 }
+
 function fmt(iso?: string) {
-  return iso ? new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+  return iso
+    ? new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+    : '-';
 }
+
 function maskKey(key?: string) {
   if (!key || key.length < 8) return key ?? '-';
   return `${key.slice(0, 7)}***${key.slice(-4)}`;
 }
+
 function planLabel(days?: number) {
   if (days === 0) return 'One time';
   if (days === 7) return '7 days';
@@ -87,7 +145,32 @@ function planLabel(days?: number) {
   if (days === 365) return '1 year';
   return days ? `${days} days` : '-';
 }
+
 function maskCode(code?: string) {
-  if (!code || code.length < 4) return code ?? '—';
+  if (!code || code.length < 4) return code ?? '-';
   return `${code.slice(0, 2)}**${code.slice(-2)}`;
+}
+
+function describeFailure(data?: { state?: string; error?: { code: string; message: string } }) {
+  if (!data) {
+    return {
+      title: 'Status unavailable',
+      message: 'Could not reach the activation API. Please try again.',
+      code: 'ERR_STATUS_UNAVAILABLE',
+    };
+  }
+
+  const fallback = data.error?.message ?? 'Please start a new login request.';
+  switch (data.state) {
+    case 'expired':
+      return { title: 'Activation code expired', message: fallback, code: data.error?.code };
+    case 'invalid_code':
+      return { title: 'Activation code rejected', message: fallback, code: data.error?.code };
+    case 'telegram_unavailable':
+      return { title: 'Telegram service unavailable', message: fallback, code: data.error?.code };
+    case 'server_error':
+      return { title: 'Activation could not be completed', message: fallback, code: data.error?.code };
+    default:
+      return { title: 'Login failed', message: fallback, code: data.error?.code };
+  }
 }

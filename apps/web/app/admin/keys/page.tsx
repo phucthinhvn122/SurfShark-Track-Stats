@@ -2,6 +2,7 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Download, Loader2, Plus, Search } from 'lucide-react';
 import { api } from '../../../lib/api';
 
 const PLANS = [
@@ -11,19 +12,47 @@ const PLANS = [
   { label: '1y', days: 365 },
 ];
 
+const FILTERS = ['all', 'unused', 'active', 'expired', 'banned'];
+
+type KeyRow = {
+  licenseKey: string;
+  durationDays?: number;
+  username?: string | null;
+  status?: string;
+  expiredAt?: string | null;
+};
+
+type KeysResponse = {
+  rows: KeyRow[];
+};
+
 export default function Keys() {
   const router = useRouter();
   const [token, setToken] = useState<string | null>(null);
-  const [rows, setRows] = useState<any[]>([]);
+  const [rows, setRows] = useState<KeyRow[]>([]);
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [durationDays, setDurationDays] = useState(30);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [working, setWorking] = useState(false);
 
-  const load = useCallback(async (t: string) => {
-    const q = `?status=${filter}&search=${encodeURIComponent(search)}`;
-    const res = await api.authed(t).keys(q);
-    setRows(res.rows);
-  }, [filter, search]);
+  const load = useCallback(
+    async (t: string) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const q = `?status=${filter}&search=${encodeURIComponent(search)}`;
+        const res = (await api.authed(t).keys(q)) as KeysResponse;
+        setRows(res.rows);
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : 'Failed to load keys');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [filter, search],
+  );
 
   useEffect(() => {
     const t = sessionStorage.getItem('admin_token');
@@ -33,110 +62,199 @@ export default function Keys() {
   }, [router, load]);
 
   async function act(action: 'ban' | 'unban' | 'extend' | 'delete', key: string) {
-    if (!token) return;
-    if (action === 'delete') await api.authed(token).remove(key);
-    else await api.authed(token).keyAction(action, key);
-    load(token);
+    if (!token || working) return;
+    setWorking(true);
+    try {
+      if (action === 'delete') await api.authed(token).remove(key);
+      else await api.authed(token).keyAction(action, key);
+      await load(token);
+    } finally {
+      setWorking(false);
+    }
   }
 
   async function generate(count: number) {
+    if (!token || working) return;
+    setWorking(true);
+    try {
+      await api.authed(token).bulkCreate(count, durationDays);
+      await load(token);
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function exportCsv(e: React.MouseEvent<HTMLAnchorElement>) {
+    e.preventDefault();
     if (!token) return;
-    await api.authed(token).bulkCreate(count, durationDays);
-    load(token);
+    const response = await fetch(api.authed(token).exportCsvUrl, { headers: { Authorization: `Bearer ${token}` } });
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'licenses.csv';
+    anchor.click();
+    URL.revokeObjectURL(url);
   }
 
   return (
-    <main className="max-w-6xl mx-auto px-6 py-10">
-      <div className="flex justify-between items-center flex-wrap gap-3">
-        <h1 className="text-3xl font-black">Key management</h1>
-        <div className="flex gap-2 flex-wrap justify-end">
-          <div className="flex gap-1 rounded-full border border-white/10 bg-white/5 p-1">
+    <main className="page-shell">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h1 className="text-3xl font-black tracking-tight sm:text-4xl">Key management</h1>
+          <p className="mt-2 text-sm leading-6 text-muted">Search, filter, generate, export, and manage license keys.</p>
+        </div>
+        <div className="flex flex-wrap gap-2 lg:justify-end">
+          <div className="flex rounded-lg border border-white/10 bg-white/[.04] p-1">
             {PLANS.map((p) => (
               <button
                 key={p.days}
                 onClick={() => setDurationDays(p.days)}
-                className={`px-3 py-1.5 rounded-full text-xs ${durationDays === p.days ? 'bg-primary text-white' : 'text-muted hover:text-white'}`}
+                className={`rounded-md px-3 py-1.5 text-xs font-bold transition ${
+                  durationDays === p.days ? 'bg-cyan-300 text-zinc-950' : 'text-muted hover:text-white'
+                }`}
               >
                 {p.label}
               </button>
             ))}
           </div>
           {[10, 100, 1000].map((n) => (
-            <button key={n} onClick={() => generate(n)} className="btn-ghost py-2 px-4 text-sm">+{n}</button>
+            <button key={n} onClick={() => generate(n)} disabled={working} className="btn-ghost px-3 py-2 text-sm">
+              <Plus size={15} />
+              {n}
+            </button>
           ))}
-          <a
-            href={token ? api.authed(token).exportCsvUrl : '#'}
-            className="btn-ghost py-2 px-4 text-sm"
-            onClick={(e) => {
-              // attach auth via fetch download since <a> can't send headers
-              e.preventDefault();
-              if (!token) return;
-              fetch(api.authed(token).exportCsvUrl, { headers: { Authorization: `Bearer ${token}` } })
-                .then((r) => r.blob())
-                .then((b) => {
-                  const url = URL.createObjectURL(b);
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = 'licenses.csv';
-                  a.click();
-                  URL.revokeObjectURL(url);
-                });
-            }}
-          >
-            ⬇ Export CSV
+          <a href={token ? api.authed(token).exportCsvUrl : '#'} className="btn-ghost px-3 py-2 text-sm" onClick={exportCsv}>
+            <Download size={15} />
+            Export CSV
           </a>
         </div>
       </div>
 
-      <div className="flex gap-3 my-5 flex-wrap">
-        <input
-          placeholder="Search key or username…"
-          className="field-input max-w-xs"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        {['all', 'unused', 'active', 'expired', 'banned'].map((f) => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            className={`px-4 py-2 rounded-full text-sm border ${filter === f ? 'bg-primary border-primary' : 'bg-white/5 border-white/10 text-muted'}`}
-          >
-            {f}
-          </button>
-        ))}
+      <div className="mt-6 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <label className="relative w-full lg:max-w-sm">
+          <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={17} />
+          <input
+            placeholder="Search key or username..."
+            className="field-input pl-10"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </label>
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {FILTERS.map((f) => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={`shrink-0 rounded-lg border px-3 py-2 text-sm font-semibold capitalize transition ${
+                filter === f ? 'border-cyan-300/30 bg-cyan-300/15 text-cyan-100' : 'border-white/10 bg-white/[.04] text-muted hover:text-white'
+              }`}
+            >
+              {f}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <div className="glass overflow-x-auto">
-        <table className="w-full text-sm min-w-[760px]">
-          <thead>
-            <tr className="text-muted text-xs uppercase">
-              {['Key', 'Plan', 'Username', 'Status', 'Expires', 'Actions'].map((h) => (
-                <th key={h} className="text-left p-4">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.licenseKey} className="border-t border-white/5">
-                <td className="p-4 font-mono text-blue-300">{r.licenseKey}</td>
-                <td className="p-4">{planLabel(r.durationDays)}</td>
-                <td className="p-4">{r.username ?? '—'}</td>
-                <td className="p-4 capitalize">{r.status}</td>
-                <td className="p-4">{r.expiredAt ? new Date(r.expiredAt).toLocaleDateString() : '—'}</td>
-                <td className="p-4 flex gap-1">
-                  {r.status === 'banned'
-                    ? <button onClick={() => act('unban', r.licenseKey)} className="btn-ghost py-1 px-3 text-xs">Unban</button>
-                    : <button onClick={() => act('ban', r.licenseKey)} className="btn-ghost py-1 px-3 text-xs">Ban</button>}
-                  <button onClick={() => act('extend', r.licenseKey)} className="btn-ghost py-1 px-3 text-xs">+30d</button>
-                  <button onClick={() => act('delete', r.licenseKey)} className="btn-ghost py-1 px-3 text-xs">Delete</button>
-                </td>
+      {error && (
+        <div className="mt-5 rounded-lg border border-red-400/20 bg-red-400/10 p-4 text-sm text-red-200">
+          {error}
+        </div>
+      )}
+
+      <div className="glass mt-5 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-sm">
+            <thead className="bg-white/[.03]">
+              <tr className="text-xs uppercase tracking-wide text-muted">
+                {['Key', 'Plan', 'Username', 'Status', 'Expires', 'Actions'].map((h) => (
+                  <th key={h} className="p-4 text-left font-bold">
+                    {h}
+                  </th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {loading ? (
+                <LoadingRows />
+              ) : rows.length > 0 ? (
+                rows.map((r) => (
+                  <tr key={r.licenseKey} className="border-t border-white/5">
+                    <td className="p-4 font-mono text-cyan-200">{r.licenseKey}</td>
+                    <td className="p-4">{planLabel(r.durationDays)}</td>
+                    <td className="p-4">{r.username ?? '-'}</td>
+                    <td className="p-4">
+                      <StatusBadge status={r.status} />
+                    </td>
+                    <td className="p-4">{r.expiredAt ? new Date(r.expiredAt).toLocaleDateString() : '-'}</td>
+                    <td className="p-4">
+                      <div className="flex gap-1">
+                        {r.status === 'banned' ? (
+                          <button onClick={() => act('unban', r.licenseKey)} disabled={working} className="btn-ghost min-h-8 px-3 py-1 text-xs">
+                            Unban
+                          </button>
+                        ) : (
+                          <button onClick={() => act('ban', r.licenseKey)} disabled={working} className="btn-ghost min-h-8 px-3 py-1 text-xs">
+                            Ban
+                          </button>
+                        )}
+                        <button onClick={() => act('extend', r.licenseKey)} disabled={working} className="btn-ghost min-h-8 px-3 py-1 text-xs">
+                          +30d
+                        </button>
+                        <button onClick={() => act('delete', r.licenseKey)} disabled={working} className="btn-ghost min-h-8 px-3 py-1 text-xs">
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={6} className="p-8 text-center text-sm text-muted">
+                    No keys match the current filters.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
+      {working && (
+        <div className="mt-3 flex items-center gap-2 text-sm text-muted">
+          <Loader2 className="animate-spin text-cyan-300" size={16} />
+          Updating keys...
+        </div>
+      )}
     </main>
   );
+}
+
+function LoadingRows() {
+  return (
+    <>
+      {Array.from({ length: 5 }).map((_, index) => (
+        <tr key={index} className="border-t border-white/5">
+          {Array.from({ length: 6 }).map((__, cell) => (
+            <td key={cell} className="p-4">
+              <div className="skeleton h-4 w-full max-w-[140px]" />
+            </td>
+          ))}
+        </tr>
+      ))}
+    </>
+  );
+}
+
+function StatusBadge({ status }: { status?: string }) {
+  const tone =
+    status === 'active'
+      ? 'border-emerald-300/25 bg-emerald-300/10 text-emerald-200'
+      : status === 'expired'
+        ? 'border-amber-300/25 bg-amber-300/10 text-amber-200'
+        : status === 'banned'
+          ? 'border-red-300/25 bg-red-300/10 text-red-200'
+          : 'border-zinc-300/20 bg-white/[.04] text-zinc-300';
+  return <span className={`status-badge ${tone}`}>{status ?? 'unknown'}</span>;
 }
 
 function planLabel(days?: number) {

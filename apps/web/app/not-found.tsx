@@ -3,11 +3,13 @@ import Link from 'next/link';
 
 export default function NotFound() {
   return (
-    <main className="max-w-md mx-auto px-6 py-20 text-center">
-      <div className="glass p-10">
-        <h2 className="text-5xl font-black bg-gradient-to-r from-secondary to-violet-500 bg-clip-text text-transparent">404</h2>
-        <p className="text-muted mt-3">This page does not exist.</p>
-        <Link href="/" className="btn-primary mt-6 inline-flex">Back home</Link>
+    <main className="mx-auto w-full max-w-lg px-4 py-10 text-center sm:px-6 sm:py-16">
+      <div className="glass p-6 sm:p-8">
+        <h1 className="text-5xl font-black text-cyan-300">404</h1>
+        <p className="mt-3 text-sm leading-6 text-muted">This page does not exist.</p>
+        <Link href="/" className="btn-primary mt-6">
+          Back home
+        </Link>
       </div>
     </main>
   );

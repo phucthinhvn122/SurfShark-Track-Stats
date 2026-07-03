@@ -25,7 +25,7 @@ export function useStatus(requestId: string | null) {
     enabled: !!requestId,
     refetchInterval: (q) => {
       const s = q.state.data?.state;
-      return s === 'success' || s === 'failed' ? false : 1500; // poll every 1.5s
+      return s && s !== 'pending' && s !== 'processing' ? false : 1500; // poll every 1.5s
     },
   });
 }

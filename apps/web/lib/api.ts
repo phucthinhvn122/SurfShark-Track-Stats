@@ -60,13 +60,13 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   login: (deviceCode: string, license: string) =>
-    req<{ requestId: string; state: 'processing' }>('/login', {
+    req<{ requestId: string; state: 'pending' | 'processing' }>('/login', {
       method: 'POST',
       body: JSON.stringify({ deviceCode, license }),
     }),
   // legacy: license-key activation (kept for backward compatibility)
   activate: (username: string, license: string) =>
-    req<{ requestId: string; state: 'processing' }>('/activate', {
+    req<{ requestId: string; state: 'pending' | 'processing' }>('/activate', {
       method: 'POST',
       body: JSON.stringify({ username, license }),
     }),
