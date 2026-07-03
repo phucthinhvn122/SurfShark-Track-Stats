@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "pnpm exec prisma generate && pnpm --filter @surfshark/shared build && pnpm --filter @surfshark/web build",
-  "installCommand": "pnpm install --frozen-lockfile",
-  "framework": null,
+  "buildCommand": "corepack prepare pnpm@11.7.0 --activate && pnpm exec prisma generate && pnpm --filter @surfshark/shared build && pnpm --filter @surfshark/web build",
+  "installCommand": "corepack prepare pnpm@11.7.0 --activate && pnpm install --frozen-lockfile --prod=false",
+  "framework": "nextjs",
   "outputDirectory": "apps/web/.next"
 }

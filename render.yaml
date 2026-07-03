@@ -6,8 +6,8 @@ services:
     runtime: node
     region: singapore
     plan: free
-    buildCommand: pnpm render:build
-    startCommand: pnpm render:start
+    buildCommand: corepack prepare pnpm@11.7.0 --activate && pnpm render:build
+    startCommand: node scripts/start-combined.js
     healthCheckPath: /health
     autoDeploy: true
     envVars:
