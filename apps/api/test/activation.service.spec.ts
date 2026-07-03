@@ -81,7 +81,7 @@ describe('ActivationService.activate', () => {
     status.get.mockResolvedValueOnce(null);
     prisma.activation.findUnique.mockResolvedValueOnce({
       result: 'pending',
-      createdAt: new Date('2026-07-03T00:00:00.000Z'),
+      createdAt: new Date(Date.now() - 30_000), // 30 seconds ago — within timeout window
       deviceCode: 'ABC123',
       license: { licenseKey: 'VPN-A9X2-K8LM', durationDays: 30, activatedAt: null, expiredAt: null },
     });
@@ -129,12 +129,54 @@ describe('ActivationService.activate', () => {
   it('returns cached telegram_unavailable without using a bot rejection state', async () => {
     status.get.mockResolvedValueOnce({
       state: 'telegram_unavailable',
-      error: { code: 'ERR_TELEGRAM_UNAVAILABLE', message: 'Activation service temporarily unavailable' },
+      error: { code: 'ERR_TELEGRAM_UNAVAILABLE', message: 'Telegram service is temporarily unavailable.' },
     });
 
     await expect(svc.getStatus('req_tg_down')).resolves.toMatchObject({
       state: 'telegram_unavailable',
       error: { code: 'ERR_TELEGRAM_UNAVAILABLE' },
+    });
+  });
+
+  it('returns cached timeout state', async () => {
+    status.get.mockResolvedValueOnce({
+      state: 'timeout',
+      error: { code: 'ERR_ACTIVATION_TIMEOUT', message: 'Login confirmation timed out.' },
+    });
+
+    await expect(svc.getStatus('req_timeout')).resolves.toMatchObject({
+      state: 'timeout',
+      error: { code: 'ERR_ACTIVATION_TIMEOUT' },
+    });
+    expect(prisma.activation.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('returns cached activation_expired state', async () => {
+    status.get.mockResolvedValueOnce({
+      state: 'activation_expired',
+      error: { code: 'ERR_ACTIVATION_EXPIRED', message: 'Code has expired.' },
+    });
+
+    await expect(svc.getStatus('req_expired')).resolves.toMatchObject({
+      state: 'activation_expired',
+      error: { code: 'ERR_ACTIVATION_EXPIRED' },
+    });
+    expect(prisma.activation.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('returns timeout when pending activation exceeds limit', async () => {
+    status.get.mockResolvedValueOnce(null);
+    const oldDate = new Date(Date.now() - 200_000); // > 3 minutes ago
+    prisma.activation.findUnique.mockResolvedValueOnce({
+      result: 'pending',
+      createdAt: oldDate,
+      deviceCode: 'ABC123',
+      license: { licenseKey: 'VPN-A9X2-K8LM', durationDays: 30, activatedAt: null, expiredAt: null },
+    });
+
+    await expect(svc.getStatus('req_pending_old')).resolves.toMatchObject({
+      state: 'timeout',
+      error: { code: 'ERR_ACTIVATION_TIMEOUT' },
     });
   });
 

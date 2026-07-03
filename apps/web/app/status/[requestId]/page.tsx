@@ -5,7 +5,13 @@ import Link from 'next/link';
 import { CheckCircle2, Clock3, Loader2, XCircle } from 'lucide-react';
 import { useStatus } from '../../../hooks/queries';
 
-const STEPS = ['Validating device code', 'Queuing login job', 'Sending /login command to Surfshark Bot', 'Parsing bot response', 'Finalizing'];
+const STEPS = [
+  'Checking your login code',
+  'Waiting for bot confirmation',
+  'Verifying Telegram response',
+  'Securing your session',
+  'Opening your dashboard',
+];
 
 export default function StatusPage({ params }: { params: Promise<{ requestId: string }> }) {
   const { requestId } = use(params);
@@ -18,8 +24,8 @@ export default function StatusPage({ params }: { params: Promise<{ requestId: st
           <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-cyan-300/10 text-cyan-300">
             <Loader2 className="animate-spin" size={28} />
           </div>
-          <h1 className="mt-5 text-2xl font-extrabold">Waiting for Telegram confirmation...</h1>
-          <p className="mt-2 text-sm leading-6 text-muted">Keep this page open while the activation result is processed.</p>
+          <h1 className="mt-5 text-2xl font-extrabold">Confirming your login...</h1>
+          <p className="mt-2 text-sm leading-6 text-muted">We're activating your device. This should only take a few seconds.</p>
           <ul className="mt-6 space-y-2 text-left text-sm text-muted">
             {STEPS.map((step) => (
               <li key={step} className="flex items-center gap-3 rounded-lg bg-white/[.04] p-3">
@@ -162,12 +168,24 @@ function describeFailure(data?: { state?: string; error?: { code: string; messag
 
   const fallback = data.error?.message ?? 'Please start a new login request.';
   switch (data.state) {
+    case 'timeout':
+      return {
+        title: 'Login confirmation timed out',
+        message: fallback,
+        code: data.error?.code,
+      };
+    case 'activation_expired':
+      return {
+        title: 'Activation code expired',
+        message: fallback,
+        code: data.error?.code,
+      };
     case 'expired':
       return { title: 'Activation code expired', message: fallback, code: data.error?.code };
     case 'invalid_code':
       return { title: 'Activation code rejected', message: fallback, code: data.error?.code };
     case 'telegram_unavailable':
-      return { title: 'Telegram service unavailable', message: fallback, code: data.error?.code };
+      return { title: 'Activation service unavailable', message: fallback, code: data.error?.code };
     case 'server_error':
       return { title: 'Activation could not be completed', message: fallback, code: data.error?.code };
     default:

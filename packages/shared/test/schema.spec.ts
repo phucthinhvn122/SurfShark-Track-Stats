@@ -1,7 +1,7 @@
 // packages/shared/test/schema.spec.ts
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { activateSchema, bulkCreateSchema, LICENSE_REGEX } from '../src/index';
+import { activateSchema, bulkCreateSchema, LICENSE_REGEX, ErrorCode } from '../src/index';
 
 describe('activateSchema', () => {
   it('accepts a valid payload and uppercases the key', () => {
@@ -41,5 +41,23 @@ describe('bulkCreateSchema', () => {
     assert.equal(bulkCreateSchema.safeParse({ count: 1, durationDays: -1 }).success, false);
     assert.equal(bulkCreateSchema.safeParse({ count: 1, durationDays: 3651 }).success, false);
     assert.equal(bulkCreateSchema.safeParse({ count: 1, durationDays: 1.5 }).success, false);
+  });
+});
+
+describe('ErrorCode', () => {
+  it('exports legacy error codes', () => {
+    assert.equal(ErrorCode.KEY_NOT_FOUND, 'ERR_KEY_NOT_FOUND');
+    assert.equal(ErrorCode.KEY_BANNED, 'ERR_KEY_BANNED');
+    assert.equal(ErrorCode.TELEGRAM_UNAVAILABLE, 'ERR_TELEGRAM_UNAVAILABLE');
+    assert.equal(ErrorCode.TELEGRAM_TIMEOUT, 'ERR_TELEGRAM_TIMEOUT');
+    assert.equal(ErrorCode.INTERNAL, 'ERR_INTERNAL');
+    assert.equal(ErrorCode.BOT_UNRECOGNIZED, 'ERR_BOT_UNRECOGNIZED');
+  });
+
+  it('exports new activation error codes', () => {
+    assert.equal(ErrorCode.ACTIVATION_TIMEOUT, 'ERR_ACTIVATION_TIMEOUT');
+    assert.equal(ErrorCode.ACTIVATION_EXPIRED, 'ERR_ACTIVATION_EXPIRED');
+    assert.equal(ErrorCode.INVALID_ACTIVATION_CODE, 'ERR_INVALID_ACTIVATION_CODE');
+    assert.equal(ErrorCode.ACTIVATION_STALE, 'ERR_ACTIVATION_STALE');
   });
 });

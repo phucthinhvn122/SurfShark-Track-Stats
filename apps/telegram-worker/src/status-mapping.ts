@@ -3,9 +3,9 @@ import { ErrorCode, type StatusResponse } from '@surfshark/shared';
 export function mapBotFailureStatus(reason: string | undefined, replyText: string, scan?: StatusResponse['scan']): StatusResponse {
   if (reason === 'expired') {
     return {
-      state: 'expired',
+      state: 'activation_expired',
       scan,
-      error: { code: 'ERR_BOT_EXPIRED', message: replyText },
+      error: { code: ErrorCode.ACTIVATION_EXPIRED, message: replyText },
     };
   }
   if (reason === 'invalid' || reason === 'failed' || reason === 'banned') {
@@ -46,19 +46,28 @@ export function mapExhaustedJobError(err: Error): StatusResponse {
   }
   if (err.message === 'TG_TIMEOUT') {
     return {
-      state: 'telegram_unavailable',
+      state: 'timeout',
       error: {
-        code: ErrorCode.TELEGRAM_TIMEOUT,
+        code: ErrorCode.ACTIVATION_TIMEOUT,
         message: 'The bot did not return a final result before the request timed out.',
       },
     };
   }
-  if (err.message === 'NO_HEALTHY_SESSION' || err.message === 'TG_UNAVAILABLE') {
+  if (err.message === 'TG_UNAVAILABLE') {
     return {
       state: 'telegram_unavailable',
       error: {
         code: ErrorCode.TELEGRAM_UNAVAILABLE,
-        message: 'Activation service temporarily unavailable',
+        message: 'Telegram service is temporarily unavailable. Please try again in a few minutes.',
+      },
+    };
+  }
+  if (err.message === 'NO_HEALTHY_SESSION') {
+    return {
+      state: 'server_error',
+      error: {
+        code: ErrorCode.INTERNAL,
+        message: 'No Telegram sessions available. Please contact the admin to rotate sessions.',
       },
     };
   }

@@ -28,6 +28,8 @@ const SESSIONS_KEY = 'worker:sessions';
 const BOT_TARGET_KEY = 'worker:bot-target';
 const SESSION_COUNT_KEY = 'worker:session-count';
 const LOGIN_SENT_KEY_PREFIX = 'login:sent:';
+const LOGIN_REPLY_KEY_PREFIX = 'login:reply:';
+const LOGIN_SENT_TTL = 300;
 const DAY = 86_400_000;
 const DEFAULT_BOT_USERNAME = '@Vpnssfree_bot';
 
@@ -133,10 +135,25 @@ function parseReply(text: string, scanStatus: LoginScanStatus): { ok: boolean; r
 }
 
 async function writeStatus(requestId: string, status: StatusResponse) {
-  console.log(
-    `[activation:${requestId}] status=${status.state}${status.error?.code ? ` code=${status.error.code}` : ''}`,
-  );
-  await connection.set(`status:${requestId}`, JSON.stringify(status), 'EX', 3600);
+  const log = (extra: string) =>
+    console.log(
+      `[activation:${requestId}] status=${status.state}${status.error?.code ? ` code=${status.error.code}` : ''} ${extra}`,
+    );
+  log('writing to Redis');
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await connection.set(`status:${requestId}`, JSON.stringify(status), 'EX', 3600);
+      log('written to Redis');
+      return;
+    } catch (e) {
+      if (attempt < 3) {
+        console.warn(`[activation:${requestId}] status write attempt ${attempt} failed, retrying: ${(e as Error).message}`);
+        await new Promise((r) => setTimeout(r, 500));
+      } else {
+        console.error(`[activation:${requestId}] status write failed after 3 attempts: ${(e as Error).message}`);
+      }
+    }
+  }
 }
 
 async function failAlreadySent(requestId: string) {
@@ -182,94 +199,141 @@ async function commitLicenseActivation(licenseKey: string, requestId: string) {
 async function processJob(job: Job<ActivationJob>) {
   const { requestId, deviceCode, licenseKey } = job.data;
   const jobId = job.id;
-  const logPrefix = `[activation:${requestId}][job:${jobId}][code:${deviceCode}]`;
+  const attemptNumber = job.attemptsMade + 1;
+  const logPrefix = `[activation:${requestId}][job:${jobId}][code:${deviceCode}][attempt:${attemptNumber}]`;
 
   console.log(`${logPrefix} picked job license=${maskKey(licenseKey)}`);
 
-  // Idempotency — FIX (audit): a retry/duplicate must not re-commit. Skip if the
-  // activation already reached a terminal state.
-  const existing = await prisma.activation.findUnique({ where: { requestId } });
-  if (existing && existing.result !== 'pending') {
-    console.log(`${logPrefix} activation already in terminal state result=${existing.result}. Skipping.`);
+  const activation = await prisma.activation.findUnique({
+    where: { requestId },
+    select: { id: true, result: true, sessionMeta: true, createdAt: true },
+  });
+
+  // Idempotency — skip if activation already in terminal state.
+  if (activation && activation.result !== 'pending') {
+    console.log(`${logPrefix} activation already in terminal state result=${activation.result}. Skipping.`);
     return;
   }
 
   const command = `/login ${deviceCode}`;
-  // Persist masked command so DB logs never contain the raw device code.
   const maskedCommand = `/login ${maskDeviceCode(deviceCode)}`;
-  
-  await prisma.telegramLog.create({ data: { action: 'login', request: maskedCommand, status: 'sent' } });
-  console.log(`${logPrefix} sent command=${maskedCommand} to bot=${botUsername}`);
+  const sentKey = `${LOGIN_SENT_KEY_PREFIX}${requestId}`;
+  const replyKey = `${LOGIN_REPLY_KEY_PREFIX}${requestId}`;
 
   let replyText: string;
   let sessionId: number;
-  try {
-    const res = await pool.sendAndAwaitReply(command);
-    replyText = res.text;
-    sessionId = res.sessionId;
-  } catch (err: any) {
-    if (err instanceof FloodWaitError) {
-      await new Promise((r) => setTimeout(r, (err.seconds + 1) * 1000));
-      throw err; // backoff retry
+
+  // Idempotency guard: on retry, reuse stored reply instead of re-sending to bot.
+  const cachedReply = await connection.get(replyKey);
+  if (cachedReply) {
+    console.log(`${logPrefix} retry with stored bot reply (skip resend) replyLen=${cachedReply.length}`);
+    replyText = cachedReply;
+    sessionId = -1;
+  } else {
+    const alreadySent = await connection.get(sentKey);
+    if (alreadySent) {
+      console.warn(`${logPrefix} command was sent but no reply stored — will resend`);
     }
-    throw err; // TG_TIMEOUT / NO_HEALTHY_SESSION / network → retry/backoff
+
+    await prisma.telegramLog.create({
+      data: { action: 'login', request: maskedCommand, status: 'sent' },
+    });
+    console.log(`${logPrefix} sending command=${maskedCommand} to bot=${botUsername}`);
+
+    try {
+      const res = await pool.sendAndAwaitReply(command);
+      replyText = res.text;
+      sessionId = res.sessionId;
+
+      // Store for idempotent retry — set BEFORE any downstream processing.
+      await connection.set(sentKey, '1', 'EX', LOGIN_SENT_TTL).catch((e) => {
+        console.warn(`${logPrefix} could not set sent key: ${(e as Error).message}`);
+      });
+      await connection.set(replyKey, replyText, 'EX', LOGIN_SENT_TTL).catch((e) => {
+        console.warn(`${logPrefix} could not set reply key: ${(e as Error).message}`);
+      });
+    } catch (err: any) {
+      if (err instanceof FloodWaitError) {
+        console.warn(`${logPrefix} flood-wait seconds=${err.seconds}`);
+        await new Promise((r) => setTimeout(r, (err.seconds + 1) * 1000));
+        throw err;
+      }
+      console.error(`${logPrefix} send/await failed error="${err.message}"`);
+      throw err;
+    }
   }
 
   await prisma.telegramLog.create({
-    data: { action: 'login', request: maskedCommand, response: `[s${sessionId}] ${replyText}`, status: 'received' },
+    data: {
+      action: 'login',
+      request: maskedCommand,
+      response: `[s${sessionId}] ${replyText}`,
+      status: 'received',
+    },
+  }).catch((e) => {
+    console.warn(`${logPrefix} could not log received reply: ${(e as Error).message}`);
   });
   console.log(`${logPrefix} received reply session=${sessionId} raw="${replyText.slice(0, 120)}"`);
 
-  // Scan the bot reply into a friendly ✅/❌/⚠️ summary that rides along on the
-  // status the web page polls — so the user sees the outcome right where they
-  // ran the login. (parseReply below stays authoritative for the license commit.)
   const scanResult = scanLoginResult(replyText);
   const scan = { status: scanResult.status, message: scanResult.message };
 
   const parsed = parseReply(replyText, scanResult.status);
+  console.log(`${logPrefix} parseResult ok=${parsed.ok} reason=${parsed.reason ?? '-'} scanStatus=${scanResult.status}`);
+
   if (!parsed.ok) {
-    // 'unexpected' is retryable (parser/transient); definitive 'no' is terminal.
     if (parsed.reason === 'unexpected') throw new Error('TG_UNEXPECTED_REPLY');
     const status = mapBotFailureStatus(parsed.reason, replyText, scan);
+    const oldStatus = activation?.result ?? 'pending';
     await prisma.activation.update({
       where: { requestId },
       data: {
         result: 'failed',
         sessionMeta: status.error ? { error: status.error } : undefined,
       },
+    }).catch((e) => {
+      console.warn(`${logPrefix} could not mark activation failed in DB: ${(e as Error).message}`);
     });
+    console.log(`${logPrefix} activation failed botRejected oldStatus=${oldStatus} newStatus=failed errorCode=${status.error?.code}`);
     await writeStatus(requestId, status);
     return;
   }
 
   let license;
   try {
+    const oldStatus = activation?.result ?? 'pending';
     license = await commitLicenseActivation(licenseKey, requestId);
+    console.log(`${logPrefix} dbCommit ok oldStatus=${oldStatus} newStatus=success license=${maskKey(license.licenseKey)}`);
   } catch (err: any) {
     const status = mapCommitFailureStatus(err, scan);
+    console.error(`${logPrefix} commit failed after telegram success errorCode=${status.error?.code} message="${err.message}"`);
     await prisma.activation.update({
       where: { requestId },
       data: {
         result: 'failed',
         sessionMeta: status.error ? { error: status.error } : undefined,
       },
+    }).catch((dbErr) => {
+      console.warn(`${logPrefix} could not save commit failure: ${(dbErr as Error).message}`);
     });
-    console.error(`${logPrefix} commit failed after telegram success:`, err.message);
     await writeStatus(requestId, status);
-    
-    // Notify on Telegram that the backend failed to save the activation
-    await pool.sendMessage(
-      sessionId,
-      `❌ Không thể hoàn tất đăng nhập với mã: ${deviceCode}. Lý do: ${(err as Error).message}`
-    ).catch((tgErr) => {
-      console.error(`${logPrefix} failed to send Telegram commit failure notification:`, tgErr.message);
-    });
+
+    if (sessionId >= 0) {
+      await pool.sendMessage(
+        sessionId,
+        `❌ Không thể hoàn tất đăng nhập với mã: ${deviceCode}. Lý do: ${(err as Error).message}`,
+      ).catch((tgErr) => {
+        console.error(`${logPrefix} failed to send Telegram commit failure notification: ${tgErr.message}`);
+      });
+    }
     return;
   }
 
-  // Idempotency: set the Redis key *only after* DB commit success
-  const sentKey = `${LOGIN_SENT_KEY_PREFIX}${requestId}`;
-  await connection.set(sentKey, '1', 'EX', 3600);
+  // Final idempotency marker (longer TTL — activation is complete).
+  await connection.set(sentKey, '1', 'EX', 3600).catch((e) => {
+    console.warn(`${logPrefix} could not extend sent key: ${(e as Error).message}`);
+  });
+  await connection.del(replyKey).catch(() => {});
 
   await writeStatus(requestId, {
     state: 'success',
@@ -325,11 +389,17 @@ async function main() {
 
   worker.on('completed', (job) => console.log(`✓ ${job.id} completed`));
   worker.on('failed', async (job, err) => {
-    console.error(`✗ ${job?.id} failed:`, err.message);
+    const maxAttempts = job?.opts?.attempts ?? 1;
+    const exhausted = job ? job.attemptsMade >= maxAttempts : true;
+    console.error(
+      `✗ ${job?.id} failed attempt=${job?.attemptsMade}/${maxAttempts} exhausted=${exhausted}: ${err.message}`,
+    );
     Sentry.captureException(err);
-    if (job && job.attemptsMade >= (job.opts.attempts ?? 1)) {
+    if (job && exhausted) {
       await dlq.add('dead', { ...job.data, error: err.message });
       const status = mapExhaustedJobError(err);
+      const logMeta = { requestId: job.data.requestId, errorCode: status.error?.code, state: status.state };
+      console.log(`[worker:failed] exhausted job ${JSON.stringify(logMeta)}`);
       await prisma.activation.update({
         where: { requestId: job.data.requestId },
         data: {
@@ -337,11 +407,8 @@ async function main() {
           sessionMeta: status.error ? { error: status.error } : undefined,
         },
       }).catch((dbErr) => {
-        console.error(`[worker:failed] failed to save error mapping in database for requestId=${job.data.requestId}:`, dbErr.message);
+        console.error(`[worker:failed] failed to save error mapping in database for requestId=${job.data.requestId}: ${dbErr.message}`);
       });
-      // Don't blame Telegram for every exhausted job: a reply the parser didn't
-      // recognise rode through fine — it's parser drift, not an outage. Map the
-      // thrown marker to the right code so the user sees the real cause.
       await writeStatus(job.data.requestId, status);
     }
   });

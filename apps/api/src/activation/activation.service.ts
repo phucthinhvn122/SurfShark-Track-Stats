@@ -8,6 +8,8 @@ import { LicenseService } from '../license/license.service';
 import { AppException } from '../common/app-exception';
 import { ErrorCode, type DeviceLoginInput, type StatusResponse } from '@surfshark/shared';
 
+const PENDING_TIMEOUT_MS = 180_000; // 3 minutes
+
 @Injectable()
 export class ActivationService {
   private readonly logger = new Logger(ActivationService.name);
@@ -29,7 +31,7 @@ export class ActivationService {
       Object.entries({ ip: meta.ip, country: meta.country, ua: meta.ua }).filter(([, v]) => v != null),
     );
     this.logger.log(
-      `[activation:${requestId}] reserving license=${maskKey(input.license)} device=${maskDeviceCode(input.deviceCode)} ip=${meta.ip ?? '-'}`,
+      `[activation:${requestId}] start license=${maskKey(input.license)} deviceCode=${maskDeviceCode(input.deviceCode)} ip=${meta.ip ?? '-'}`,
     );
     await this.licenses.reserveActivation(input.license, {
       requestId,
@@ -42,10 +44,10 @@ export class ActivationService {
 
     try {
       await this.queue.enqueue({ requestId, deviceCode: input.deviceCode, licenseKey: input.license });
-      this.logger.log(`[activation:${requestId}] queued telegram login job jobId=${requestId}`);
+      this.logger.log(`[activation:${requestId}] enqueued job jobId=${requestId}`);
     } catch (e) {
       const message = (e as Error).message;
-      this.logger.error(`[activation:${requestId}] enqueue failed jobId=${requestId}: ${message}`);
+      this.logger.error(`[activation:${requestId}] enqueue failed jobId=${requestId} error="${message}"`);
       await this.licenses.failReservedActivation(requestId, message).catch((markError) => {
         this.logger.error(`[activation:${requestId}] failed to mark activation failed: ${(markError as Error).message}`);
       });
@@ -71,15 +73,18 @@ export class ActivationService {
       this.logger.warn(`[activation:${requestId}] queued but could not write pending status: ${(e as Error).message}`);
     });
 
+    this.logger.log(`[activation:${requestId}] returned pending to frontend`);
     return { requestId, state: 'pending' as const };
   }
 
   /** Polled by the frontend until the state is terminal. */
   async getStatus(requestId: string): Promise<StatusResponse> {
     const cached = await this.status.get(requestId);
-    if (cached) return cached;
+    if (cached) {
+      this.logger.log(`[activation:${requestId}] status from cache state=${cached.state}${cached.error?.code ? ` code=${cached.error.code}` : ''}`);
+      return cached;
+    }
 
-    // fallback to DB if cache expired
     const act = await this.prisma.activation.findUnique({
       where: { requestId },
       select: {
@@ -90,33 +95,50 @@ export class ActivationService {
         license: { select: { licenseKey: true, durationDays: true, activatedAt: true, expiredAt: true } },
       },
     });
-    if (!act) throw new AppException(ErrorCode.KEY_NOT_FOUND, 'Request not found', HttpStatus.NOT_FOUND);
+    if (!act) {
+      this.logger.warn(`[activation:${requestId}] status not found (no cache, no DB row)`);
+      throw new AppException(ErrorCode.KEY_NOT_FOUND, 'Request not found', HttpStatus.NOT_FOUND);
+    }
 
-    if (act.result === 'pending') return { state: 'pending' };
+    this.logger.log(`[activation:${requestId}] status from DB result=${act.result}`);
+
+    if (act.result === 'pending') {
+      // Check for timeout — if pending for too long, the worker likely never picked up the job.
+      const ageMs = Date.now() - act.createdAt.getTime();
+      if (ageMs > PENDING_TIMEOUT_MS) {
+        this.logger.warn(`[activation:${requestId}] pending timed out ageMs=${ageMs}`);
+        return {
+          state: 'timeout',
+          error: {
+            code: ErrorCode.ACTIVATION_TIMEOUT,
+            message: 'Login confirmation timed out. Please start a new login request.',
+          },
+        };
+      }
+      return { state: 'pending' };
+    }
+
     if (act.result === 'failed') {
-      const meta = act.sessionMeta as { error?: { code: string; message: string } } | null;
+      const meta = act.sessionMeta as { error?: { code: string; message: string }; enqueueFailure?: string } | null;
       const code = meta?.error?.code;
       const message = meta?.error?.message ?? 'Activation failed. Please start a new login request.';
-      
-      if (code === 'ERR_BOT_EXPIRED') {
-        return {
-          state: 'expired',
-          error: { code, message },
-        };
+
+      if (code === ErrorCode.ACTIVATION_EXPIRED || code === 'ERR_BOT_EXPIRED') {
+        return { state: 'activation_expired', error: { code: code ?? ErrorCode.ACTIVATION_EXPIRED, message } };
+      }
+      if (code === ErrorCode.ACTIVATION_TIMEOUT) {
+        return { state: 'timeout', error: { code: ErrorCode.ACTIVATION_TIMEOUT, message } };
       }
       if (code === 'ERR_BOT_INVALID' || code === 'ERR_BOT_FAILED' || code === 'ERR_BOT_BANNED') {
-        return {
-          state: 'invalid_code',
-          error: { code, message },
-        };
+        return { state: 'invalid_code', error: { code, message } };
       }
-      if (code === 'ERR_TELEGRAM_UNAVAILABLE' || code === 'ERR_TELEGRAM_TIMEOUT') {
-        return {
-          state: 'telegram_unavailable',
-          error: { code, message },
-        };
+      if (code === ErrorCode.TELEGRAM_UNAVAILABLE) {
+        return { state: 'telegram_unavailable', error: { code, message } };
       }
-      
+      if (code === ErrorCode.TELEGRAM_TIMEOUT) {
+        return { state: 'timeout', error: { code: ErrorCode.ACTIVATION_TIMEOUT, message } };
+      }
+
       return {
         state: 'server_error',
         error: {

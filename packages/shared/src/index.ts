@@ -80,7 +80,9 @@ export type ActivationState =
   | 'invalid_code'
   | 'telegram_unavailable'
   | 'server_error'
-  | 'failed';
+  | 'failed'
+  | 'timeout'
+  | 'activation_expired';
 
 export interface StatusResponse {
   state: ActivationState;
@@ -116,6 +118,10 @@ export const ErrorCode = {
   RATE_LIMITED: 'ERR_RATE_LIMITED',
   UNAUTHORIZED: 'ERR_UNAUTHORIZED',
   INTERNAL: 'ERR_INTERNAL',
+  ACTIVATION_TIMEOUT: 'ERR_ACTIVATION_TIMEOUT',
+  ACTIVATION_EXPIRED: 'ERR_ACTIVATION_EXPIRED',
+  INVALID_ACTIVATION_CODE: 'ERR_INVALID_ACTIVATION_CODE',
+  ACTIVATION_STALE: 'ERR_ACTIVATION_STALE',
 } as const;
 
 /** Input for POST /key-redeem — the user only enters a key. */
