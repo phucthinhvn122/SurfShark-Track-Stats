@@ -175,7 +175,22 @@ async function commitLicenseActivation(licenseKey: string, requestId: string) {
     if (!row) throw new Error('ERR_KEY_NOT_FOUND');
     if (row.status === 'banned') throw new Error('ERR_KEY_BANNED');
     if (row.status === 'expired') throw new Error('ERR_KEY_EXPIRED');
-    if (row.status === 'active') throw new Error('ERR_KEY_IN_USE');
+
+    // Idempotent: if the license is already active, check if this requestId
+    // was the one that activated it. If yes, the DB committed but the response
+    // was lost — return success.
+    if (row.status === 'active') {
+      const existing = await tx.activation.findUnique({
+        where: { requestId },
+        select: { result: true },
+      });
+      if (existing?.result === 'success') {
+        const lic = await tx.license.findUnique({ where: { licenseKey } });
+        if (!lic) throw new Error('ERR_KEY_NOT_FOUND');
+        return lic;
+      }
+      throw new Error('ERR_KEY_IN_USE');
+    }
 
     const activatedAt = new Date();
     const expiredAt = new Date(activatedAt.getTime() + row.duration_days * DAY);
@@ -189,7 +204,19 @@ async function commitLicenseActivation(licenseKey: string, requestId: string) {
       where: { requestId, result: 'pending' },
       data: { result: 'success', licenseId: license.id },
     });
-    if (activation.count !== 1) throw new Error('ERR_ACTIVATION_NOT_PENDING');
+    if (activation.count !== 1) {
+      // Activation was already updated by a previous retry that lost connection
+      const existing = await tx.activation.findUnique({
+        where: { requestId },
+        select: { result: true },
+      });
+      if (existing?.result === 'success') {
+        const lic = await tx.license.findUnique({ where: { licenseKey } });
+        if (!lic) throw new Error('ERR_KEY_NOT_FOUND');
+        return lic;
+      }
+      throw new Error('ERR_ACTIVATION_NOT_PENDING');
+    }
 
     return license;
   });
@@ -232,7 +259,23 @@ async function processJob(job: Job<ActivationJob>) {
   } else {
     const alreadySent = await connection.get(sentKey);
     if (alreadySent) {
-      console.warn(`${logPrefix} command was sent but no reply stored — will resend`);
+      // Previous attempt sent the command but did not store the reply.
+      // Re-sending risks the bot saying "code already used".
+      // Mark as failed to avoid duplicate /login.
+      console.error(`${logPrefix} previous attempt sent /login but reply was lost. Marking failed.`);
+      const status: StatusResponse = {
+        state: 'server_error',
+        error: {
+          code: 'ERR_DUPLICATE_LOGIN',
+          message: 'Your login code was sent to the bot but we lost the reply. Please start a new login request.',
+        },
+      };
+      await prisma.activation.update({
+        where: { requestId },
+        data: { result: 'failed', sessionMeta: { error: status.error } },
+      }).catch(() => {});
+      await writeStatus(requestId, status);
+      return;
     }
 
     await prisma.telegramLog.create({
@@ -240,15 +283,18 @@ async function processJob(job: Job<ActivationJob>) {
     });
     console.log(`${logPrefix} sending command=${maskedCommand} to bot=${botUsername}`);
 
+    // Set sentKey BEFORE the actual send, so on retry we know the command was
+    // dispatched even if sendAndAwaitReply times out or the connection drops.
+    await connection.set(sentKey, '1', 'EX', LOGIN_SENT_TTL).catch((e) => {
+      console.warn(`${logPrefix} could not set pre-send sent key: ${(e as Error).message}`);
+    });
+
     try {
       const res = await pool.sendAndAwaitReply(command);
       replyText = res.text;
       sessionId = res.sessionId;
 
-      // Store for idempotent retry — set BEFORE any downstream processing.
-      await connection.set(sentKey, '1', 'EX', LOGIN_SENT_TTL).catch((e) => {
-        console.warn(`${logPrefix} could not set sent key: ${(e as Error).message}`);
-      });
+      // Store reply for idempotent retry.
       await connection.set(replyKey, replyText, 'EX', LOGIN_SENT_TTL).catch((e) => {
         console.warn(`${logPrefix} could not set reply key: ${(e as Error).message}`);
       });
