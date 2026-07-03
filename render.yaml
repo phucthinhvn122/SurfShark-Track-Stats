@@ -6,7 +6,7 @@ services:
     runtime: node
     region: singapore
     plan: free
-    buildCommand: npx -y pnpm@11.7.0 render:build
+    buildCommand: npx -y pnpm@10.14.0 render:build
     startCommand: node scripts/start-combined.js
     healthCheckPath: /health
     autoDeploy: true
