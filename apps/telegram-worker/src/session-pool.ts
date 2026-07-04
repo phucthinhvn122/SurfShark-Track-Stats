@@ -184,12 +184,23 @@ export class SessionPool {
         try {
           return await this.collectReply(s, command);
         } catch (e) {
-          // FIX (audit): on timeout, a reply that lands just after the window
-          // closes would be matched to the NEXT serialized job on this session
-          // (response mismatch). Drain any late bot message before releasing
-          // the chain so it cannot be mis-attributed.
           if ((e as Error).message === 'TG_TIMEOUT') {
+            // FIX (audit): on timeout, a reply that lands just after the window
+            // closes would be matched to the NEXT serialized job on this session
+            // (response mismatch). Drain any late bot message before releasing
+            // the chain so it cannot be mis-attributed.
             await this.drainBotMessages(s, this.drainMs);
+            // FIX (race): the bot may have already replied before our handler
+            // was attached (e.g. the user manually sent the same /login code in
+            // their personal Telegram first, or the bot replied on a sibling
+            // MTProto session). Fall back to chat history and look for any
+            // recent bot message that mentions the device code.
+            const recovered = await this.findRecentBotReply(s, command);
+            if (recovered) {
+              // eslint-disable-next-line no-console
+              console.log(`Session #${s.id}: recovered bot reply from chat history after timeout len=${recovered.length}`);
+              return recovered;
+            }
           }
           throw e;
         }
@@ -207,6 +218,36 @@ export class SessionPool {
     } finally {
       s.inFlight--;
     }
+  }
+
+  /**
+   * Last-resort: scan the recent chat history for a bot message that mentions
+   * the device code. Used when the live handler missed the reply (e.g. because
+   * the user also sent /login manually, so the bot processed the first sender
+   * and our session only got the second /login which the bot ignored).
+   */
+  private async findRecentBotReply(s: PooledSession, command: string): Promise<string | null> {
+    const expectedCode = extractDeviceCode(command);
+    if (!s.bot || !expectedCode) return null;
+    try {
+      const messages = await s.client.getMessages(s.bot as any, { limit: 12 });
+      // Walk newest -> oldest, skip intermediate "processing" placeholders, and
+      // return the first message that mentions the device code (a true result).
+      for (const m of messages as Array<{ message?: string; senderId?: unknown; date?: number }>) {
+        const text = m.message ?? '';
+        if (!text) continue;
+        if (!text.toUpperCase().includes(expectedCode)) continue;
+        if (isIntermediateReply(text)) continue;
+        // Found a terminal bot message that mentions the device code.
+        // eslint-disable-next-line no-console
+        console.log(`Session #${s.id}: found recent bot reply in chat history text="${text.slice(0, 80)}"`);
+        return text;
+      }
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn(`Session #${s.id}: chat history fetch failed: ${(e as Error).message}`);
+    }
+    return null;
   }
 
   /**

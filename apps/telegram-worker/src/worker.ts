@@ -271,7 +271,7 @@ async function processJob(job: Job<ActivationJob>) {
         state: 'server_error',
         error: {
           code: 'ERR_DUPLICATE_LOGIN',
-          message: 'Your login code was sent to the bot but we lost the reply. Please start a new login request.',
+          message: 'We sent the login code to the bot but did not receive a reply. If you see a success message in Telegram, your device is already activated — please verify in the Surfshark app or start a new login.',
         },
       };
       await prisma.activation.update({
