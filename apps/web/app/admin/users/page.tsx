@@ -2,40 +2,25 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { api } from '../../../lib/api';
+import { useAdminUsers } from '../../../hooks/queries';
+import { Pagination } from '../../../components/Pagination';
 
-type LoginHistoryRow = {
-  kind?: string;
-  deviceCode?: string;
-  licenseKey?: string;
-  activatedAt?: string;
-  ip?: string | null;
-  country?: string | null;
-  device?: string | null;
-};
-
-type UsersResponse = {
-  rows: LoginHistoryRow[];
-};
+const LIMIT = 20;
 
 export default function Users() {
   const router = useRouter();
-  const [rows, setRows] = useState<LoginHistoryRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     const t = sessionStorage.getItem('admin_token');
     if (!t) return router.push('/admin/login');
-    api
-      .authed(t)
-      .users()
-      .then((r) => setRows((r as UsersResponse).rows))
-      .catch((err: unknown) => {
-        setError(err instanceof Error ? err.message : 'Failed to load login history');
-      })
-      .finally(() => setLoading(false));
+    setToken(t);
   }, [router]);
+
+  const { data, isLoading, error } = useAdminUsers(token, { page, limit: LIMIT });
+  const rows = data?.rows ?? [];
+  const total = data?.total ?? 0;
 
   return (
     <main className="page-shell">
@@ -44,7 +29,11 @@ export default function Users() {
         <p className="mt-2 text-sm leading-6 text-muted">Recent device and license activation records.</p>
       </div>
 
-      {error && <div className="mt-5 rounded-lg border border-red-400/20 bg-red-400/10 p-4 text-sm text-red-200">{error}</div>}
+      {error && (
+        <div className="mt-5 rounded-lg border border-red-400/20 bg-red-400/10 p-4 text-sm text-red-200">
+          {error instanceof Error ? error.message : 'Failed to load login history'}
+        </div>
+      )}
 
       <div className="glass mt-6 overflow-hidden">
         <div className="overflow-x-auto">
@@ -59,7 +48,7 @@ export default function Users() {
               </tr>
             </thead>
             <tbody>
-              {loading ? (
+              {isLoading ? (
                 <LoadingRows />
               ) : rows.length > 0 ? (
                 rows.map((r, i) => (
@@ -87,6 +76,7 @@ export default function Users() {
           </table>
         </div>
       </div>
+      <Pagination page={page} limit={LIMIT} total={total} onPageChange={setPage} />
     </main>
   );
 }

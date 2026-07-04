@@ -58,6 +58,40 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return json.data as T;
 }
 
+export interface AdminKeyRow {
+  licenseKey: string;
+  durationDays?: number;
+  username?: string | null;
+  status?: string;
+  expiredAt?: string | null;
+}
+
+export interface AdminKeysResponse {
+  rows: AdminKeyRow[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface AdminUserRow {
+  kind?: string;
+  deviceCode?: string | null;
+  licenseKey?: string | null;
+  status?: string | null;
+  expiredAt?: string | null;
+  ip?: string | null;
+  country?: string | null;
+  device?: string | null;
+  activatedAt?: string;
+}
+
+export interface AdminUsersResponse {
+  rows: AdminUserRow[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
 export interface StatusStreamHandle {
   /** Stop the SSE subscription and close the connection. */
   close: () => void;
@@ -160,8 +194,20 @@ export const api = {
     const auth = { Authorization: `Bearer ${token}` };
     return {
       dashboard: () => req<any>('/admin/dashboard', { headers: auth }),
-      keys: (q = '') => req<any>(`/admin/keys${q}`, { headers: auth }),
-      users: (q = '') => req<any>(`/admin/users${q}`, { headers: auth }),
+      keys: (params: { status?: string; search?: string; page?: number; limit?: number } = {}) => {
+        const qs = new URLSearchParams();
+        if (params.status) qs.set('status', params.status);
+        if (params.search) qs.set('search', params.search);
+        qs.set('page', String(params.page ?? 1));
+        qs.set('limit', String(params.limit ?? 20));
+        return req<AdminKeysResponse>(`/admin/keys?${qs.toString()}`, { headers: auth });
+      },
+      users: (params: { page?: number; limit?: number } = {}) => {
+        const qs = new URLSearchParams();
+        qs.set('page', String(params.page ?? 1));
+        qs.set('limit', String(params.limit ?? 20));
+        return req<AdminUsersResponse>(`/admin/users?${qs.toString()}`, { headers: auth });
+      },
       logs: (type: string) => req<any>(`/admin/logs?type=${type}`, { headers: auth }),
       getSettings: () => req<any>('/admin/settings', { headers: auth }),
       updateSettings: (patch: Record<string, unknown>) =>

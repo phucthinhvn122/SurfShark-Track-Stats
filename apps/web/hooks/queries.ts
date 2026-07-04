@@ -1,7 +1,7 @@
 // apps/web/hooks/queries.ts
 'use client';
 import { useEffect } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type StatusStreamHandle } from '../lib/api';
 
 /** /login trigger: submit a 6-character device code, returns requestId. */
@@ -63,4 +63,65 @@ export function useStatusStream(
     });
     return () => handle?.close();
   }, [requestId, qc, onTerminal]);
+}
+
+/** Paginated key list. `placeholderData: keepPreviousData` keeps the old
+ *  page's rows on screen while the next page loads, instead of flashing
+ *  a skeleton on every filter/page change. */
+export function useAdminKeys(
+  token: string | null,
+  params: { status: string; search: string; page: number; limit: number },
+) {
+  return useQuery({
+    queryKey: ['admin', 'keys', params],
+    queryFn: () => api.authed(token!).keys(params),
+    enabled: !!token,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useAdminUsers(token: string | null, params: { page: number; limit: number }) {
+  return useQuery({
+    queryKey: ['admin', 'users', params],
+    queryFn: () => api.authed(token!).users(params),
+    enabled: !!token,
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** The backend caps logs at 200 rows with no pagination, so this just
+ *  supports an optional toggleable poll ("Live") on top of manual refetch. */
+export function useAdminLogs(token: string | null, type: string, opts?: { live?: boolean }) {
+  return useQuery({
+    queryKey: ['admin', 'logs', type],
+    queryFn: () => api.authed(token!).logs(type),
+    enabled: !!token,
+    placeholderData: keepPreviousData,
+    refetchInterval: opts?.live ? 5000 : false,
+  });
+}
+
+export function useKeyAction(token: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { action: 'ban' | 'unban' | 'extend'; licenseKey: string }) =>
+      api.authed(token!).keyAction(v.action, v.licenseKey),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'keys'] }),
+  });
+}
+
+export function useRemoveKey(token: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (licenseKey: string) => api.authed(token!).remove(licenseKey),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'keys'] }),
+  });
+}
+
+export function useBulkCreateKeys(token: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { count: number; durationDays: number }) => api.authed(token!).bulkCreate(v.count, v.durationDays),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'keys'] }),
+  });
 }

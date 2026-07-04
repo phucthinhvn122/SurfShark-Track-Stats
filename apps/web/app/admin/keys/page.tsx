@@ -1,9 +1,12 @@
 // apps/web/app/admin/keys/page.tsx
 'use client';
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Download, Loader2, Plus, Search } from 'lucide-react';
 import { api } from '../../../lib/api';
+import { useAdminKeys, useBulkCreateKeys, useKeyAction, useRemoveKey } from '../../../hooks/queries';
+import { useDebouncedValue } from '../../../hooks/use-debounced-value';
+import { Pagination } from '../../../components/Pagination';
 
 const PLANS = [
   { label: 'One time', days: 0 },
@@ -13,75 +16,55 @@ const PLANS = [
 ];
 
 const FILTERS = ['all', 'unused', 'active', 'expired', 'banned'];
-
-type KeyRow = {
-  licenseKey: string;
-  durationDays?: number;
-  username?: string | null;
-  status?: string;
-  expiredAt?: string | null;
-};
-
-type KeysResponse = {
-  rows: KeyRow[];
-};
+const LIMIT = 20;
 
 export default function Keys() {
   const router = useRouter();
   const [token, setToken] = useState<string | null>(null);
-  const [rows, setRows] = useState<KeyRow[]>([]);
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
   const [durationDays, setDurationDays] = useState(30);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [working, setWorking] = useState(false);
 
-  const load = useCallback(
-    async (t: string) => {
-      setLoading(true);
-      setError(null);
-      try {
-        const q = `?status=${filter}&search=${encodeURIComponent(search)}`;
-        const res = (await api.authed(t).keys(q)) as KeysResponse;
-        setRows(res.rows);
-      } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : 'Failed to load keys');
-      } finally {
-        setLoading(false);
-      }
-    },
-    [filter, search],
-  );
+  // Debounce the search box so typing doesn't refetch on every keystroke —
+  // the input itself stays fully responsive, only the query is delayed.
+  const debouncedSearch = useDebouncedValue(search, 300);
 
   useEffect(() => {
     const t = sessionStorage.getItem('admin_token');
     if (!t) return router.push('/admin/login');
     setToken(t);
-    load(t);
-  }, [router, load]);
+  }, [router]);
 
-  async function act(action: 'ban' | 'unban' | 'extend' | 'delete', key: string) {
-    if (!token || working) return;
-    setWorking(true);
-    try {
-      if (action === 'delete') await api.authed(token).remove(key);
-      else await api.authed(token).keyAction(action, key);
-      await load(token);
-    } finally {
-      setWorking(false);
-    }
+  // Jump back to page 1 whenever filters change — staying on e.g. page 4 of
+  // an "all" search after switching to "banned" would show an empty page.
+  useEffect(() => {
+    setPage(1);
+  }, [filter, debouncedSearch]);
+
+  const { data, isLoading, isFetching, error } = useAdminKeys(token, {
+    status: filter,
+    search: debouncedSearch,
+    page,
+    limit: LIMIT,
+  });
+  const rows = data?.rows ?? [];
+  const total = data?.total ?? 0;
+
+  const keyAction = useKeyAction(token);
+  const removeKey = useRemoveKey(token);
+  const bulkCreate = useBulkCreateKeys(token);
+  const working = keyAction.isPending || removeKey.isPending || bulkCreate.isPending;
+
+  function act(action: 'ban' | 'unban' | 'extend' | 'delete', key: string) {
+    if (working) return;
+    if (action === 'delete') removeKey.mutate(key);
+    else keyAction.mutate({ action, licenseKey: key });
   }
 
-  async function generate(count: number) {
-    if (!token || working) return;
-    setWorking(true);
-    try {
-      await api.authed(token).bulkCreate(count, durationDays);
-      await load(token);
-    } finally {
-      setWorking(false);
-    }
+  function generate(count: number) {
+    if (working) return;
+    bulkCreate.mutate({ count, durationDays }, { onSuccess: () => setPage(1) });
   }
 
   async function exportCsv(e: React.MouseEvent<HTMLAnchorElement>) {
@@ -158,7 +141,7 @@ export default function Keys() {
 
       {error && (
         <div className="mt-5 rounded-lg border border-red-400/20 bg-red-400/10 p-4 text-sm text-red-200">
-          {error}
+          {error instanceof Error ? error.message : 'Failed to load keys'}
         </div>
       )}
 
@@ -175,7 +158,7 @@ export default function Keys() {
               </tr>
             </thead>
             <tbody>
-              {loading ? (
+              {isLoading ? (
                 <LoadingRows />
               ) : rows.length > 0 ? (
                 rows.map((r) => (
@@ -219,10 +202,11 @@ export default function Keys() {
           </table>
         </div>
       </div>
-      {working && (
+      <Pagination page={page} limit={LIMIT} total={total} onPageChange={setPage} />
+      {(working || isFetching) && (
         <div className="mt-3 flex items-center gap-2 text-sm text-muted">
           <Loader2 className="animate-spin text-cyan-300" size={16} />
-          Updating keys...
+          {working ? 'Updating keys...' : 'Refreshing...'}
         </div>
       )}
     </main>

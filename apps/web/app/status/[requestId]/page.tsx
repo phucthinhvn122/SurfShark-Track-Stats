@@ -4,6 +4,7 @@ import { use } from 'react';
 import Link from 'next/link';
 import { CheckCircle2, Clock3, Loader2, XCircle } from 'lucide-react';
 import { useStatus, useStatusStream } from '../../../hooks/queries';
+import { describeActivationFailure } from '../../../lib/describe-activation-state';
 
 const STEPS = [
   'Checking your login code',
@@ -45,7 +46,7 @@ export default function StatusPage({ params }: { params: Promise<{ requestId: st
   }
 
   if (isError || (data && data.state !== 'success')) {
-    const detail = describeFailure(data);
+    const detail = describeActivationFailure(data);
     return (
       <main className="mx-auto w-full max-w-lg px-4 py-10 text-center sm:px-6 sm:py-16">
         <div className="glass p-6 sm:p-8">
@@ -162,38 +163,3 @@ function maskCode(code?: string) {
   return `${code.slice(0, 2)}**${code.slice(-2)}`;
 }
 
-function describeFailure(data?: { state?: string; error?: { code: string; message: string } }) {
-  if (!data) {
-    return {
-      title: 'Status unavailable',
-      message: 'Could not reach the activation API. Please try again.',
-      code: 'ERR_STATUS_UNAVAILABLE',
-    };
-  }
-
-  const fallback = data.error?.message ?? 'Please start a new login request.';
-  switch (data.state) {
-    case 'timeout':
-      return {
-        title: 'Login confirmation timed out',
-        message: fallback,
-        code: data.error?.code,
-      };
-    case 'activation_expired':
-      return {
-        title: 'Activation code expired',
-        message: fallback,
-        code: data.error?.code,
-      };
-    case 'expired':
-      return { title: 'Activation code expired', message: fallback, code: data.error?.code };
-    case 'invalid_code':
-      return { title: 'Activation code rejected', message: fallback, code: data.error?.code };
-    case 'telegram_unavailable':
-      return { title: 'Activation service unavailable', message: fallback, code: data.error?.code };
-    case 'server_error':
-      return { title: 'Activation could not be completed', message: fallback, code: data.error?.code };
-    default:
-      return { title: 'Login failed', message: fallback, code: data.error?.code };
-  }
-}
