@@ -123,15 +123,19 @@ function parseReply(text: string, scanStatus: LoginScanStatus): { ok: boolean; r
   const t = searchableText(text);
   // Failure first so it wins when a reply mentions both outcomes.
   if (/\bthat\s*bai\b|khong\s*thanh\s*cong/.test(t)) return { ok: false, reason: 'failed' };
-  if (/\bthanh\s*cong\b|dang\s*nhap\s*thanh\s*cong/.test(t)) return { ok: true };
-  if (/✅|activated|logged in|success|valid|welcome/.test(t)) return { ok: true };
+  // Success: Vietnamese patterns
+  if (/\bthanh\s*cong\b|dang\s*nhap\s*thanh\s*cong|kich\s*hoat\s*thanh\s*cong|da\s*kich\s*hoat/.test(t)) return { ok: true };
+  // Success: English/international patterns
+  if (/✅|activated|logged\s*in|success|valid|welcome|ok\b|done|complete|granted|authorized|hoan\s*tat/.test(t)) return { ok: true };
   if (/banned|blocked|bi\s*cam|bi\s*khoa/.test(t)) return { ok: false, reason: 'banned' };
   if (/expired|het\s*han/.test(t)) return { ok: false, reason: 'expired' };
-  if (/invalid|not found|unknown|wrong|khong\s*hop\s*le|khong\s*tim\s*thay|khong\s*dung|\bsai\b|da\s*(duoc\s*)?su\s*dung|da\s*kich\s*hoat/.test(t))
+  if (/invalid|not\s*found|unknown|wrong|khong\s*hop\s*le|khong\s*tim\s*thay|khong\s*dung|\bsai\b|da\s*(duoc\s*)?su\s*dung/.test(t))
     return { ok: false, reason: 'invalid' };
-  // unexpected format → alert (parser drift) and treat as retryable failure
-  Sentry.captureMessage(`Unexpected bot reply: ${text.slice(0, 200)}`, 'warning');
-  return { ok: false, reason: 'unexpected' };
+  // Unexpected format — capture for diagnostics but DO NOT throw.
+  // The bot already replied (so no point retrying /login), we just couldn't
+  // classify it. Mark as terminal so the user can investigate and retry.
+  Sentry.captureMessage(`Unrecognized bot reply: ${text.slice(0, 200)}`, 'warning');
+  return { ok: false, reason: 'unrecognized' };
 }
 
 async function writeStatus(requestId: string, status: StatusResponse) {
@@ -328,7 +332,11 @@ async function processJob(job: Job<ActivationJob>) {
   console.log(`${logPrefix} parseResult ok=${parsed.ok} reason=${parsed.reason ?? '-'} scanStatus=${scanResult.status}`);
 
   if (!parsed.ok) {
-    if (parsed.reason === 'unexpected') throw new Error('TG_UNEXPECTED_REPLY');
+    // 'unexpected' is a parser failure (reply format not recognized). The bot
+    // already replied with SOMETHING terminal, but we couldn't classify it.
+    // Mark as terminal failure (NOT a BullMQ throw) so we don't spam the bot
+    // with /login retries. The user can see the raw bot reply via scan.message
+    // and start a fresh request if needed.
     const status = mapBotFailureStatus(parsed.reason, replyText, scan);
     const oldStatus = activation?.result ?? 'pending';
     await prisma.activation.update({
@@ -340,7 +348,7 @@ async function processJob(job: Job<ActivationJob>) {
     }).catch((e) => {
       console.warn(`${logPrefix} could not mark activation failed in DB: ${(e as Error).message}`);
     });
-    console.log(`${logPrefix} activation failed botRejected oldStatus=${oldStatus} newStatus=failed errorCode=${status.error?.code}`);
+    console.log(`${logPrefix} activation failed botRejected oldStatus=${oldStatus} newStatus=failed errorCode=${status.error?.code} reason=${parsed.reason ?? '-'}`);
     await writeStatus(requestId, status);
     return;
   }

@@ -15,6 +15,16 @@ export function mapBotFailureStatus(reason: string | undefined, replyText: strin
       error: { code: `ERR_BOT_${(reason ?? 'invalid').toUpperCase()}`, message: replyText },
     };
   }
+  if (reason === 'unrecognized') {
+    return {
+      state: 'server_error',
+      scan,
+      error: {
+        code: ErrorCode.BOT_UNRECOGNIZED,
+        message: 'The bot replied in an unrecognised format. The login was sent, but we could not confirm the outcome. Please verify in your Surfshark app.',
+      },
+    };
+  }
   return {
     state: 'server_error',
     scan,

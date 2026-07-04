@@ -35,6 +35,52 @@ function extractDeviceCode(command: string): string | null {
   return match?.[1]?.toUpperCase() ?? null;
 }
 
+/**
+ * Coerce a Telegram peer/senderId (which may be a number, bigint, GramJS Long,
+ * or a Peer/InputPeer object) to a canonical string ID. This is more reliable
+ * than `event.message.senderId?.toString()`, whose output depends on the GramJS
+ * version and the message type.
+ */
+function peerIdToString(peer: unknown): string | null {
+  if (peer == null) return null;
+  if (typeof peer === 'string') return peer;
+  if (typeof peer === 'number') return String(peer);
+  if (typeof peer === 'bigint') return peer.toString();
+  if (typeof peer !== 'object') return null;
+  const p = peer as Record<string, unknown>;
+  // PeerUser / InputPeerUser: { userId: Long } or { userId: number }
+  if (p.userId !== undefined && p.userId !== null) {
+    return typeof p.userId === 'object' && p.userId !== null && 'toString' in (p.userId as object)
+      ? (p.userId as { toString: () => string }).toString()
+      : String(p.userId);
+  }
+  if (p.chatId !== undefined && p.chatId !== null) {
+    return typeof p.chatId === 'object' && p.chatId !== null && 'toString' in (p.chatId as object)
+      ? (p.chatId as { toString: () => string }).toString()
+      : String(p.chatId);
+  }
+  if (p.channelId !== undefined && p.channelId !== null) {
+    return typeof p.channelId === 'object' && p.channelId !== null && 'toString' in (p.channelId as object)
+      ? (p.channelId as { toString: () => string }).toString()
+      : String(p.channelId);
+  }
+  if (p.id !== undefined && p.id !== null) {
+    if (typeof p.id === 'object' && p.id !== null) {
+      if ('toString' in (p.id as object)) return (p.id as { toString: () => string }).toString();
+    }
+    return String(p.id);
+  }
+  if (typeof (p as { toString?: () => string }).toString === 'function') {
+    const s = (p as { toString: () => string }).toString();
+    // GramJS toString() on Peer objects often returns "PeerUser({...})" or similar
+    // - try to extract the numeric ID from inside the parentheses.
+    const m = s.match(/(\d{4,})/);
+    if (m) return m[1];
+    return s;
+  }
+  return null;
+}
+
 export class SessionPool {
   private sessions: PooledSession[] = [];
   private rr = 0;
@@ -186,7 +232,7 @@ export class SessionPool {
         }, remaining);
       };
       const handler = (event: NewMessageEvent) => {
-        const senderId = event.message.senderId?.toString();
+        const senderId = peerIdToString(event.message.senderId);
         const text = event.message.message ?? '';
         const fromBot = Boolean(senderId && s.botId && senderId === s.botId);
         const mentionsExpectedCode = Boolean(expectedCode && text.toUpperCase().includes(expectedCode));
@@ -195,7 +241,7 @@ export class SessionPool {
           // Some Telegram updates do not expose the expected bot sender metadata.
           // A code-bearing reply is still the result for this serialized command.
           // eslint-disable-next-line no-console
-          console.warn(`Session #${s.id}: accepting bot reply by device-code match`);
+          console.warn(`Session #${s.id}: accepting bot reply by device-code match senderId=${senderId} botId=${s.botId}`);
         }
         sawBotMessage = true;
         // Skip the placeholder ack and keep waiting for the real result, as long
@@ -227,7 +273,7 @@ export class SessionPool {
       if (!s.botId) return resolve();
       const filter = new NewMessage({ incoming: true });
       const handler = (event: NewMessageEvent) => {
-        if (event.message.senderId?.toString() === s.botId) {
+        if (peerIdToString(event.message.senderId) === s.botId) {
           // eslint-disable-next-line no-console
           console.warn(`Session #${s.id}: discarded late bot reply after timeout`);
         }
