@@ -11,7 +11,7 @@
 import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions';
 import { NewMessage, NewMessageEvent } from 'telegram/events';
-import { isIntermediateReply } from '@surfshark/shared';
+import { isIntermediateReply, looksTerminalReply } from '@surfshark/shared';
 
 export interface PoolSendResult {
   text: string;
@@ -230,17 +230,26 @@ export class SessionPool {
     const expectedCode = extractDeviceCode(command);
     if (!s.bot || !expectedCode) return null;
     try {
-      const messages = await s.client.getMessages(s.bot as any, { limit: 12 });
-      // Walk newest -> oldest, skip intermediate "processing" placeholders, and
-      // return the first message that mentions the device code (a true result).
+      const messages = await s.client.getMessages(s.bot as any, { limit: 20 });
+      // Walk newest -> oldest. Terminal replies (success/failure/...) always
+      // win over an intermediate phrase that might also be present (e.g. bot
+      // appends "vui lòng chờ giây lát" to its success message); pure
+      // "processing" placeholders are skipped, and anything else is taken as
+      // the result rather than returning null and forcing a 45s timeout.
       for (const m of messages as Array<{ message?: string; senderId?: unknown; date?: number }>) {
         const text = m.message ?? '';
         if (!text) continue;
         if (!text.toUpperCase().includes(expectedCode)) continue;
+        if (looksTerminalReply(text)) {
+          // eslint-disable-next-line no-console
+          console.log(`Session #${s.id}: found recent TERMINAL bot reply in chat history text="${text.slice(0, 80)}"`);
+          return text;
+        }
         if (isIntermediateReply(text)) continue;
-        // Found a terminal bot message that mentions the device code.
+        // Found a non-terminal, non-placeholder message — return it so the
+        // parser still gets a chance to classify it.
         // eslint-disable-next-line no-console
-        console.log(`Session #${s.id}: found recent bot reply in chat history text="${text.slice(0, 80)}"`);
+        console.log(`Session #${s.id}: found recent non-placeholder bot reply in chat history text="${text.slice(0, 80)}"`);
         return text;
       }
     } catch (e) {
@@ -265,13 +274,21 @@ export class SessionPool {
       let sawBotMessage = false;
       let timer: ReturnType<typeof setTimeout>;
       const arm = () => {
-        const windowMs = sawBotMessage ? this.replyTimeoutMs : this.maxReplyWaitMs;
+        // After we've seen at least one bot message (usually a "Đang xử lý…"
+        // placeholder), the real outcome almost always arrives within 15s.
+        // Hard-cap the wait window to 15s so we don't hold the deadline for an
+        // extra 40+ seconds if the event handler ever misses the terminal
+        // message (sender metadata mismatch, late handler attach, etc.) —
+        // falling back to findRecentBotReply is much faster than waiting the
+        // full replyTimeoutMs after a placeholder was already seen.
+        const windowMs = sawBotMessage ? 15_000 : this.maxReplyWaitMs;
         const remaining = Math.max(0, Math.min(windowMs, deadline - Date.now()));
         timer = setTimeout(() => {
           cleanup();
           reject(new Error('TG_TIMEOUT'));
         }, remaining);
       };
+      const sentAtForLog = Date.now();
       const handler = (event: NewMessageEvent) => {
         const senderId = peerIdToString(event.message.senderId);
         const text = event.message.message ?? '';
@@ -285,13 +302,31 @@ export class SessionPool {
           console.warn(`Session #${s.id}: accepting bot reply by device-code match senderId=${senderId} botId=${s.botId}`);
         }
         sawBotMessage = true;
-        // Skip the placeholder ack and keep waiting for the real result, as long
-        // as we're still within the absolute deadline.
+        // Terminal reply (success/failure/...) wins over an intermediate phrase
+        // that might also appear in the same message (e.g. bot appends "vui
+        // lòng chờ giây lát" to its success message). Resolving here avoids
+        // waiting out the 45s deadline and then scanning chat history.
+        if (looksTerminalReply(text)) {
+          cleanup();
+          resolve(text);
+          return;
+        }
+        // Pure placeholder ("Đang xử lý…") — skip and keep waiting for the
+        // real result, as long as we're still within the absolute deadline.
         if (isIntermediateReply(text) && Date.now() < deadline) {
+          const elapsed = Date.now() - sentAtForLog;
+          const remaining = Math.max(0, deadline - Date.now());
+          // eslint-disable-next-line no-console
+          console.log(
+            `Session #${s.id}: skipped intermediate (elapsed=${elapsed}ms, remaining=${remaining}ms) text="${text.slice(0, 80)}"`,
+          );
           clearTimeout(timer);
           arm();
           return;
         }
+        // Neither terminal nor placeholder — treat the message as the final
+        // result so the parser gets a chance to classify it. Better than
+        // skipping and waiting the full 45s for an unknown format.
         cleanup();
         resolve(text);
       };

@@ -6,6 +6,7 @@ import { INestApplication } from '@nestjs/common';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { loadEnv } from './config/env.config';
+import { responseTimeMiddleware } from './common/response-time.middleware';
 
 const DEFAULT_ALLOWED_ORIGINS = ['http://localhost:3000', 'https://surfshark-activate.vercel.app'];
 const VERCEL_PREVIEW_ORIGIN = /^https:\/\/[a-z0-9-]+\.vercel\.app$/i;
@@ -37,6 +38,11 @@ async function bootstrap(): Promise<void> {
   // surfaces the real client IP via req.ip (required by throttler + audit logs).
   const expressApp = app.getHttpAdapter().getInstance() as { set: (k: string, v: unknown) => void };
   expressApp.set('trust proxy', 1);
+
+  // Log elapsed time for every request so cold-start spikes show up in
+  // Render logs. Useful to confirm/refute the Render free-tier sleep
+  // hypothesis without enabling full request tracing.
+  app.use(responseTimeMiddleware);
 
   app.useLogger(app.get(Logger));
   // WEB_ORIGIN may be a single URL or a comma-separated list of allowed origins

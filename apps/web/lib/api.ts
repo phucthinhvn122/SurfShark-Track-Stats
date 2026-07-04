@@ -18,23 +18,39 @@ export class ApiUnreachableError extends Error {
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const url = `${BASE}${path}`;
+  // 60s default. Render free tier cold-start can take 20-30s; longer than that
+  // and the service is likely actually down. Callers can override per-request.
+  const timeoutMs = (init as { timeoutMs?: number } | undefined)?.timeoutMs ?? 60_000;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   let res: Response;
   try {
     res = await fetch(url, {
       ...init,
+      signal: controller.signal,
       headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
     });
   } catch (e) {
-    // fetch() rejects on DNS, connection refused, mixed-content, or CORS block.
-    // The browser hides the real reason; surface something actionable.
+    clearTimeout(timeoutId);
+    // fetch() rejects on DNS, connection refused, mixed-content, CORS block, or
+    // AbortController.abort(). The browser hides the real reason; surface
+    // something actionable.
     // eslint-disable-next-line no-console
     console.error(`[api] network error hitting ${url}`, e);
+    if ((e as { name?: string })?.name === 'AbortError') {
+      throw new ApiUnreachableError(
+        `Server did not respond within ${Math.round(timeoutMs / 1000)}s. It may still be starting up (free tier) — please retry in a moment.`,
+        url,
+        e,
+      );
+    }
     throw new ApiUnreachableError(
       `Cannot reach API at ${BASE}. Check your network, or contact the admin if the service is down.`,
       url,
       e,
     );
   }
+  clearTimeout(timeoutId);
 
   let json: any;
   try {
@@ -125,6 +141,8 @@ export function statusStream(
   es.addEventListener('status', (e: MessageEvent) => {
     try {
       const status = JSON.parse(e.data) as StatusResponse;
+      // eslint-disable-next-line no-console
+      console.log(`[sse] status received at=${Date.now()} state=${status.state}`);
       callbacks.onStatus(status);
     } catch (err) {
       // eslint-disable-next-line no-console

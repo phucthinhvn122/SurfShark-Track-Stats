@@ -38,6 +38,15 @@ const FAILED_RE = /\bthat\s*bai\b/i;
 const SUCCESS_RE = /\bthanh\s*cong\b/i;
 
 /**
+ * Single source of truth for "this bot reply is the final outcome" — used by the
+ * reply collector (session-pool) so it can resolve a job on the FIRST message
+ * that matches, instead of waiting out the full deadline and recovering via
+ * chat history. Kept in sync with `parseReply()` in apps/telegram-worker via the
+ * shared import. Matched against the diacritics-stripped + lowercased fold.
+ */
+export const TERMINAL_RE = /\bthat\s*bai\b|\bthanh\s*cong\b|dang\s*nhap\s*thanh\s*cong|kich\s*hoat\s*thanh\s*cong|da\s*kich\s*hoat|khong\s*thanh\s*cong|banned|blocked|bi\s*cam|bi\s*khoa|expired|het\s*han|invalid|not\s*found|unknown|wrong|khong\s*hop\s*le|khong\s*tim\s*thay|khong\s*dung|\bsai\b|da\s*(duoc\s*)?su\s*dung|hoan\s*tat|\bactivated\b|logged\s*in|\bsuccess\b|\bvalid\b|\bwelcome\b|\bok\b|\bdone\b|\bcomplete\b|\bgranted\b|\bauthorized\b/;
+
+/**
  * Transient acknowledgements some bots send BEFORE the real outcome, e.g.
  * "⏳ Đang xử lý đăng nhập với mã: …" ("Processing login with code…"). These are
  * NOT terminal — a reply collector should skip them and keep waiting for the next
@@ -102,10 +111,33 @@ export function scanLoginResult(response: unknown): LoginScanResult {
  * True when a bot reply is only a transient "processing"/"please wait"
  * acknowledgement and the real success/failure outcome is still to come. Reply
  * collectors use this to skip the placeholder and keep awaiting the next message.
+ *
+ * If the message ALSO matches a terminal pattern (success/failure/banned/...),
+ * we return false even if the intermediate regex also matches — the reply is
+ * the final outcome and must NOT be skipped. This makes the function safe to
+ * call without an explicit `looksTerminalReply` pre-check, but callers that
+ * can short-circuit on terminal replies (session-pool) should still check
+ * `looksTerminalReply` first to avoid an unnecessary regex evaluation.
  */
 export function isIntermediateReply(response: unknown): boolean {
   const text = searchableText(normalize(response));
+  if (TERMINAL_RE.test(text)) return false;
   return INTERMEDIATE_RE.test(text);
+}
+
+/**
+ * True when a bot reply is the FINAL outcome of a /login command (success,
+ * failure, banned, expired, invalid, etc.). Reply collectors use this to
+ * resolve immediately instead of waiting for additional messages.
+ *
+ * IMPORTANT: callers must check `looksTerminalReply` BEFORE
+ * `isIntermediateReply`. Some terminal replies include phrases that the
+ * intermediate regex also matches (e.g. "✅ Đăng nhập thành công. Vui lòng
+ * chờ giây lát."), and we must always classify them as terminal.
+ */
+export function looksTerminalReply(response: unknown): boolean {
+  const text = searchableText(normalize(response));
+  return TERMINAL_RE.test(text);
 }
 
 /** Minimal sender contract — return value ignored. */

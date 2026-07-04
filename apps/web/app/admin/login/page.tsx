@@ -1,19 +1,29 @@
 // apps/web/app/admin/login/page.tsx
 'use client';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { AlertCircle, Loader2, ShieldCheck } from 'lucide-react';
+import { AlertCircle, Hourglass, Loader2, ShieldCheck } from 'lucide-react';
 import { api, ApiUnreachableError } from '../../../lib/api';
+
+const SLOW_NOTICE_MS = 5_000;
 
 export default function AdminLogin() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [slow, setSlow] = useState(false);
+  const slowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (slowTimerRef.current) clearTimeout(slowTimerRef.current);
+  }, []);
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
+    setSlow(false);
     setLoading(true);
+    slowTimerRef.current = setTimeout(() => setSlow(true), SLOW_NOTICE_MS);
     const form = new FormData(e.currentTarget);
     try {
       const { accessToken } = await api.adminLogin(String(form.get('username')), String(form.get('password')));
@@ -28,6 +38,11 @@ export default function AdminLogin() {
         setError('Login failed');
       }
     } finally {
+      if (slowTimerRef.current) {
+        clearTimeout(slowTimerRef.current);
+        slowTimerRef.current = null;
+      }
+      setSlow(false);
       setLoading(false);
     }
   }
@@ -57,6 +72,12 @@ export default function AdminLogin() {
             <span className="text-sm font-semibold text-zinc-200">Password</span>
             <input name="password" type="password" placeholder="Password" className="field-input" autoComplete="current-password" disabled={loading} />
           </label>
+          {slow && !error && (
+            <div className="flex gap-2 rounded-lg border border-amber-400/20 bg-amber-400/10 p-3 text-sm text-amber-100">
+              <Hourglass className="mt-0.5 shrink-0" size={16} />
+              <span>Server is taking longer than usual (it may be waking up on the free tier). Please wait — do not refresh.</span>
+            </div>
+          )}
           {error && (
             <div className="flex gap-2 rounded-lg border border-red-400/20 bg-red-400/10 p-3 text-sm text-red-200">
               <AlertCircle className="mt-0.5 shrink-0" size={16} />

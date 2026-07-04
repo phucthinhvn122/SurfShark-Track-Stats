@@ -19,7 +19,7 @@ import IORedis from 'ioredis';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { FloodWaitError } from 'telegram/errors';
 import { createDecipheriv, scryptSync } from 'crypto';
-import { scanLoginResult, type LoginScanStatus, type StatusResponse } from '@surfshark/shared';
+import { scanLoginResult, TERMINAL_RE, type LoginScanStatus, type StatusResponse } from '@surfshark/shared';
 import { SessionPool } from './session-pool';
 import { mapBotFailureStatus, mapCommitFailureStatus, mapExhaustedJobError } from './status-mapping';
 
@@ -121,6 +121,15 @@ function parseReply(text: string, scanStatus: LoginScanStatus): { ok: boolean; r
   // `t` is diacritics-stripped + lowercased, so Vietnamese matches use the
   // ASCII fold ("thất bại" -> "that bai", "hết hạn" -> "het han").
   const t = searchableText(text);
+  // Single source of truth: shared TERMINAL_RE decides if the reply is a final
+  // outcome. If it isn't, we can't classify it and bail out early.
+  if (!TERMINAL_RE.test(t)) {
+    // Unexpected format — capture for diagnostics but DO NOT throw.
+    // The bot already replied (so no point retrying /login), we just couldn't
+    // classify it. Mark as terminal so the user can investigate and retry.
+    Sentry.captureMessage(`Unrecognized bot reply: ${text.slice(0, 200)}`, 'warning');
+    return { ok: false, reason: 'unrecognized' };
+  }
   // Failure first so it wins when a reply mentions both outcomes.
   if (/\bthat\s*bai\b|khong\s*thanh\s*cong/.test(t)) return { ok: false, reason: 'failed' };
   // Success: Vietnamese patterns
@@ -131,10 +140,8 @@ function parseReply(text: string, scanStatus: LoginScanStatus): { ok: boolean; r
   if (/expired|het\s*han/.test(t)) return { ok: false, reason: 'expired' };
   if (/invalid|not\s*found|unknown|wrong|khong\s*hop\s*le|khong\s*tim\s*thay|khong\s*dung|\bsai\b|da\s*(duoc\s*)?su\s*dung/.test(t))
     return { ok: false, reason: 'invalid' };
-  // Unexpected format — capture for diagnostics but DO NOT throw.
-  // The bot already replied (so no point retrying /login), we just couldn't
-  // classify it. Mark as terminal so the user can investigate and retry.
-  Sentry.captureMessage(`Unrecognized bot reply: ${text.slice(0, 200)}`, 'warning');
+  // Terminal by TERMINAL_RE but not by any reason-specific regex above — treat
+  // as failed to be safe (the bot acknowledged something we can't classify).
   return { ok: false, reason: 'unrecognized' };
 }
 
@@ -144,10 +151,16 @@ async function writeStatus(requestId: string, status: StatusResponse) {
       `[activation:${requestId}] status=${status.state}${status.error?.code ? ` code=${status.error.code}` : ''} ${extra}`,
     );
   log('writing to Redis');
+  const payload = JSON.stringify(status);
+  const channel = 'status:events';
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      await connection.set(`status:${requestId}`, JSON.stringify(status), 'EX', 3600);
-      log('written to Redis');
+      await connection
+        .multi()
+        .set(`status:${requestId}`, payload, 'EX', 3600)
+        .publish(channel, JSON.stringify({ requestId, status }))
+        .exec();
+      log('written to Redis + PUBLISH');
       return;
     } catch (e) {
       if (attempt < 3) {
@@ -253,6 +266,9 @@ async function processJob(job: Job<ActivationJob>) {
 
   let replyText: string;
   let sessionId: number;
+  // Captured right before the bot is sent /login; used to measure end-to-end
+  // latency from "command dispatched" to "terminal status written".
+  let sentAt = 0;
 
   // Idempotency guard: on retry, reuse stored reply instead of re-sending to bot.
   const cachedReply = await connection.get(replyKey);
@@ -290,6 +306,7 @@ async function processJob(job: Job<ActivationJob>) {
       console.warn(`${logPrefix} could not log sent command: ${(e as Error).message}`);
     });
     console.log(`${logPrefix} sending command=${maskedCommand} to bot=${botUsername}`);
+    sentAt = Date.now();
 
     // Set sentKey BEFORE the actual send, so on retry we know the command was
     // dispatched even if sendAndAwaitReply times out or the connection drops.
@@ -330,7 +347,8 @@ async function processJob(job: Job<ActivationJob>) {
   }).catch((e) => {
     console.warn(`${logPrefix} could not log received reply: ${(e as Error).message}`);
   });
-  console.log(`${logPrefix} received reply session=${sessionId} raw="${replyText.slice(0, 120)}"`);
+  const replyReceivedAt = Date.now();
+  console.log(`${logPrefix} received reply session=${sessionId} botLatencyMs=${sentAt ? replyReceivedAt - sentAt : '-'} raw="${replyText.slice(0, 120)}"`);
 
   const scanResult = scanLoginResult(replyText);
   const scan = { status: scanResult.status, message: scanResult.message };
@@ -361,10 +379,13 @@ async function processJob(job: Job<ActivationJob>) {
   }
 
   let license;
+  let dbLatencyMs = -1;
   try {
     const oldStatus = activation?.result ?? 'pending';
+    const dbStartAt = Date.now();
     license = await commitLicenseActivation(licenseKey, requestId);
-    console.log(`${logPrefix} dbCommit ok oldStatus=${oldStatus} newStatus=success license=${maskKey(license.licenseKey)}`);
+    dbLatencyMs = Date.now() - dbStartAt;
+    console.log(`${logPrefix} dbCommit ok oldStatus=${oldStatus} newStatus=success license=${maskKey(license.licenseKey)} dbLatencyMs=${dbLatencyMs}`);
   } catch (err: any) {
     const status = mapCommitFailureStatus(err, scan);
     console.error(`${logPrefix} commit failed after telegram success errorCode=${status.error?.code} message="${err.message}"`);
@@ -390,16 +411,10 @@ async function processJob(job: Job<ActivationJob>) {
     return;
   }
 
-  // Final idempotency marker (longer TTL — activation is complete).
-  await connection.set(sentKey, '1', 'EX', 3600).catch((e) => {
-    console.warn(`${logPrefix} could not extend sent key: ${(e as Error).message}`);
-  });
-  await connection.del(replyKey).catch(() => {});
-
-  // CRITICAL PATH: writeStatus must fire BEFORE any other awaits so the SSE
-  // PUBLISH happens as soon as the DB commit succeeds. The remaining log row
-  // is fire-and-forget — losing it on a worker crash is acceptable (the
-  // telegramLog table is for debugging, not the source of truth).
+  // CRITICAL PATH: writeStatus (SET + PUBLISH) fires FIRST so the SSE push
+  // reaches the browser the instant the DB commit succeeds. Everything else
+  // is fire-and-forget — losing it on a worker crash is acceptable.
+  const sseStartAt = Date.now();
   await writeStatus(requestId, {
     state: 'success',
     scan,
@@ -409,7 +424,15 @@ async function processJob(job: Job<ActivationJob>) {
     activatedAt: license.activatedAt?.toISOString(),
     expiredAt: license.expiredAt?.toISOString(),
   });
-  console.log(`${logPrefix} committed success license=${maskKey(license.licenseKey)}`);
+  const sseMs = Date.now() - sseStartAt;
+  const totalMs = sentAt ? Date.now() - sentAt : -1;
+  console.log(`${logPrefix} committed success license=${maskKey(license.licenseKey)} totalMs=${totalMs} botMs=${sentAt ? replyReceivedAt - sentAt : '-'} dbMs=${dbLatencyMs} sseMs=${sseMs} botReplyLen=${replyText.length}`);
+
+  // Fire-and-forget: extend idempotency TTL + cleanup reply cache.
+  connection.set(sentKey, '1', 'EX', 3600).catch((e) => {
+    console.warn(`${logPrefix} could not extend sent key: ${(e as Error).message}`);
+  });
+  connection.del(replyKey).catch(() => {});
 
   // Fire-and-forget: log the successful commit. Not awaited so the SSE push
   // already fired by the time this DB write happens.
