@@ -92,10 +92,10 @@ export class SessionPool {
     private readonly botUsername: string,
     private readonly sessionStrings: string[],
     private readonly replyTimeoutMs = 60_000,
-    // Hard cap across all messages of one send. Some bot runs return only the
-    // final result and can take longer than 25s, so the first reply gets the
-    // full deadline before per-message inactivity limits apply.
-    private readonly maxReplyWaitMs = 120_000,
+    // Hard cap across all messages of one send. 45s covers a healthy
+    // bot round-trip (~3-10s) plus a generous safety margin; any longer
+    // and the user has been staring at the waiting screen too long.
+    private readonly maxReplyWaitMs = 45_000,
   ) {}
 
   /** Connect every session and resolve the bot entity once per session. */

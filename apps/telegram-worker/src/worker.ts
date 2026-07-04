@@ -282,8 +282,12 @@ async function processJob(job: Job<ActivationJob>) {
       return;
     }
 
-    await prisma.telegramLog.create({
+    // Fire-and-forget: log the sent command. Not awaited so the bot
+    // round-trip starts immediately (saves ~30-50ms per job).
+    prisma.telegramLog.create({
       data: { action: 'login', request: maskedCommand, status: 'sent' },
+    }).catch((e) => {
+      console.warn(`${logPrefix} could not log sent command: ${(e as Error).message}`);
     });
     console.log(`${logPrefix} sending command=${maskedCommand} to bot=${botUsername}`);
 
@@ -313,7 +317,10 @@ async function processJob(job: Job<ActivationJob>) {
     }
   }
 
-  await prisma.telegramLog.create({
+  // Fire-and-forget: log the received reply. Not awaited so it doesn't
+  // block the commit + writeStatus path. The telegramLog table is for
+  // debugging; losing a row on worker crash is acceptable.
+  prisma.telegramLog.create({
     data: {
       action: 'login',
       request: maskedCommand,
@@ -389,6 +396,10 @@ async function processJob(job: Job<ActivationJob>) {
   });
   await connection.del(replyKey).catch(() => {});
 
+  // CRITICAL PATH: writeStatus must fire BEFORE any other awaits so the SSE
+  // PUBLISH happens as soon as the DB commit succeeds. The remaining log row
+  // is fire-and-forget — losing it on a worker crash is acceptable (the
+  // telegramLog table is for debugging, not the source of truth).
   await writeStatus(requestId, {
     state: 'success',
     scan,
@@ -399,6 +410,19 @@ async function processJob(job: Job<ActivationJob>) {
     expiredAt: license.expiredAt?.toISOString(),
   });
   console.log(`${logPrefix} committed success license=${maskKey(license.licenseKey)}`);
+
+  // Fire-and-forget: log the successful commit. Not awaited so the SSE push
+  // already fired by the time this DB write happens.
+  prisma.telegramLog.create({
+    data: {
+      action: 'login',
+      request: maskedCommand,
+      response: `[s${sessionId}] ${replyText} -> committed ${maskKey(license.licenseKey)}`,
+      status: 'received',
+    },
+  }).catch((e) => {
+    console.warn(`${logPrefix} could not log committed reply: ${(e as Error).message}`);
+  });
 }
 
 // ---------- boot ----------
@@ -437,7 +461,7 @@ async function main() {
   const worker = new Worker<ActivationJob>('activation', processJob, {
     connection,
     concurrency,
-    lockDuration: 150_000, // 150 seconds, safely larger than maxReplyWaitMs (120s)
+    lockDuration: 60_000, // 60s: maxReplyWaitMs (45s) + commit/writeStatus/log buffer
     limiter: { max: 20 * Math.max(1, pool.size), duration: 60_000 },
   });
 

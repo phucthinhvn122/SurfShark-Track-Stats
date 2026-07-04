@@ -63,39 +63,43 @@ export class ActivationController {
         try { sub.disconnect(); } catch { /* noop */ }
       };
 
-      sub.subscribe('status:events').catch((e: Error) => {
-        // eslint-disable-next-line no-console
-        console.error(`[sse] subscribe failed for ${requestId}: ${e.message}`);
-      });
-
       sub.on('message', (channel: string, raw: string) => {
         if (channel !== 'status:events') return;
         try {
           const evt = JSON.parse(raw);
           if (evt?.requestId !== requestId) return;
+          if (closed) return;
           subscriber.next({ type: 'status', data: JSON.stringify(evt.status) });
         } catch {
           /* ignore malformed payloads */
         }
       });
 
-      // Send the current status immediately so the client doesn't have to
-      // also call GET /status.
-      this.service
-        .getStatus(requestId)
-        .then((status) => {
+      // CRITICAL: await SUBSCRIBE before doing anything else. Any PUBLISH that
+      // happens after this point is guaranteed to be delivered to the message
+      // handler above. Otherwise the worker could write the terminal status
+      // between our subscribe() call and the SUBSCRIBE arriving at the Redis
+      // server, and we'd silently miss the success event.
+      sub
+        .subscribe('status:events')
+        .then(() => {
           if (closed) return;
-          subscriber.next({ type: 'status', data: JSON.stringify(status) });
-          // If the initial status is already terminal, close the stream —
-          // there's nothing more to push.
-          if (status.state !== 'pending' && status.state !== 'processing') {
-            setImmediate(() => {
-              subscriber.complete();
-              cleanup();
-            });
-          }
+          // Send the current status immediately so the client doesn't have to
+          // also call GET /status.
+          return this.service.getStatus(requestId).then((status) => {
+            if (closed) return;
+            subscriber.next({ type: 'status', data: JSON.stringify(status) });
+            if (status.state !== 'pending' && status.state !== 'processing') {
+              setImmediate(() => {
+                subscriber.complete();
+                cleanup();
+              });
+            }
+          });
         })
         .catch((e: Error) => {
+          // eslint-disable-next-line no-console
+          console.error(`[sse] subscribe failed for ${requestId}: ${e.message}`);
           if (closed) return;
           subscriber.next({
             type: 'error',
