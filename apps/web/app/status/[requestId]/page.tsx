@@ -3,7 +3,7 @@
 import { use } from 'react';
 import Link from 'next/link';
 import { CheckCircle2, Clock3, Loader2, XCircle } from 'lucide-react';
-import { useStatus } from '../../../hooks/queries';
+import { useStatus, useStatusStream } from '../../../hooks/queries';
 
 const STEPS = [
   'Checking your login code',
@@ -16,6 +16,11 @@ const STEPS = [
 export default function StatusPage({ params }: { params: Promise<{ requestId: string }> }) {
   const { requestId } = use(params);
   const { data, isError } = useStatus(requestId);
+
+  // Open the SSE stream as soon as the page mounts. React Query's cache is
+  // updated in-place as events arrive, so this component re-renders the
+  // moment the worker writes the terminal status (no 1.5s polling lag).
+  useStatusStream(requestId);
 
   if (!isError && (!data || data.state === 'pending' || data.state === 'processing')) {
     return (

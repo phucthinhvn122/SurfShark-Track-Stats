@@ -8,7 +8,9 @@ import { LicenseService } from '../license/license.service';
 import { AppException } from '../common/app-exception';
 import { ErrorCode, type DeviceLoginInput, type StatusResponse } from '@surfshark/shared';
 
-const PENDING_TIMEOUT_MS = 180_000; // 3 minutes
+const PENDING_TIMEOUT_MS = 120_000; // 2 minutes — SSE pushes the terminal
+// result the moment the worker writes it, so a long poll ceiling is no longer
+// needed. 2 minutes is enough to absorb a worst-case bot round-trip.
 
 @Injectable()
 export class ActivationService {

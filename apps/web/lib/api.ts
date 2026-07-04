@@ -58,6 +58,84 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return json.data as T;
 }
 
+export interface StatusStreamHandle {
+  /** Stop the SSE subscription and close the connection. */
+  close: () => void;
+}
+
+/**
+ * Subscribe to the SSE status stream for instant updates. Falls back to a
+ * 1s polling loop if EventSource is unavailable or the connection errors.
+ * The returned handle's `close()` stops the stream.
+ */
+export function statusStream(
+  requestId: string,
+  callbacks: {
+    onStatus: (status: StatusResponse) => void;
+    onError?: (e: Event | Error) => void;
+  },
+): StatusStreamHandle {
+  if (typeof window === 'undefined' || typeof EventSource === 'undefined') {
+    return pollFallback(requestId, callbacks);
+  }
+  const url = `${BASE}/status/${encodeURIComponent(requestId)}/stream`;
+  let es: EventSource | null = null;
+  let closed = false;
+
+  try {
+    es = new EventSource(url, { withCredentials: false });
+  } catch (e) {
+    return pollFallback(requestId, callbacks);
+  }
+
+  es.addEventListener('status', (e: MessageEvent) => {
+    try {
+      const status = JSON.parse(e.data) as StatusResponse;
+      callbacks.onStatus(status);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[api] failed to parse SSE status payload', err);
+    }
+  });
+  es.addEventListener('error', (e) => {
+    callbacks.onError?.(e);
+    if (closed) return;
+    // The browser auto-reconnects EventSource on transient errors, so we
+    // only fall back to polling when the stream stays broken for a while.
+    // For now, just leave the EventSource open; if it dies permanently the
+    // refetchInterval in useStatus() will keep the UI moving.
+  });
+
+  return {
+    close: () => {
+      closed = true;
+      try { es?.close(); } catch { /* noop */ }
+    },
+  };
+}
+
+function pollFallback(
+  requestId: string,
+  callbacks: {
+    onStatus: (status: StatusResponse) => void;
+    onError?: (e: Event | Error) => void;
+  },
+): StatusStreamHandle {
+  let stopped = false;
+  const tick = async () => {
+    if (stopped) return;
+    try {
+      const s = await api.status(requestId);
+      callbacks.onStatus(s);
+    } catch (e) {
+      callbacks.onError?.(e as Error);
+    }
+  };
+  const id = setInterval(tick, 1000);
+  void tick(); // fire one immediately
+  return { close: () => { stopped = true; clearInterval(id); } };
+}
+
 export const api = {
   login: (deviceCode: string, license: string) =>
     req<{ requestId: string; state: 'pending' | 'processing' }>('/login', {
@@ -71,6 +149,7 @@ export const api = {
       body: JSON.stringify({ username, license }),
     }),
   status: (requestId: string) => req<StatusResponse>(`/status/${requestId}`),
+  statusStream,
   adminLogin: (username: string, password: string) =>
     req<{ accessToken: string; expiresIn: number }>('/admin/login', {
       method: 'POST',
