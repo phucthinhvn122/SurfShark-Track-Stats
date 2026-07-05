@@ -3,7 +3,6 @@ import { Injectable, CanActivate, ExecutionContext, HttpStatus } from '@nestjs/c
 import { JwtService } from '@nestjs/jwt';
 import { AppException } from '../common/app-exception';
 import { ErrorCode } from '@surfshark/shared';
-import { loadEnv } from '../config/env.config';
 
 const JWT_ISS = 'surfshark-activation';
 const JWT_AUD = 'surfshark-admin';
@@ -21,7 +20,6 @@ export class JwtAuthGuard implements CanActivate {
     }
     try {
       req.user = await this.jwt.verifyAsync(token, {
-        secret: loadEnv().JWT_SECRET,
         issuer: JWT_ISS,
         audience: JWT_AUD,
       });

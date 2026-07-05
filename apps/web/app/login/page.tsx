@@ -1,12 +1,15 @@
 // apps/web/app/login/page.tsx
 'use client';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { AlertCircle, ArrowRight, KeyRound, Loader2, ShieldCheck } from 'lucide-react';
 import { deviceLoginSchema, type DeviceLoginInput } from '@surfshark/shared';
 import { useLogin } from '../../hooks/queries';
 import StatusView from '../../components/auth/StatusView';
+
+// After this many ms of waiting, show a "server waking up" hint.
+const COLD_START_HINT_MS = 4_000;
 
 export default function LoginPage() {
   const login = useLogin();
@@ -19,6 +22,25 @@ export default function LoginPage() {
   const [submittedRequestId, setSubmittedRequestId] = useState<string | null>(null);
   const submitInFlight = useRef(false);
 
+  // Show a "server is waking up" notice after COLD_START_HINT_MS of waiting.
+  const [showColdStartHint, setShowColdStartHint] = useState(false);
+  const coldStartTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const busy = isSubmitting || login.isPending;
+
+  // Start / cancel the cold-start hint timer in sync with busy state.
+  useEffect(() => {
+    if (busy) {
+      coldStartTimer.current = setTimeout(() => setShowColdStartHint(true), COLD_START_HINT_MS);
+    } else {
+      if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
+      setShowColdStartHint(false);
+    }
+    return () => {
+      if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
+    };
+  }, [busy]);
+
   const {
     register,
     handleSubmit,
@@ -27,8 +49,6 @@ export default function LoginPage() {
   } = useForm<DeviceLoginInput>({
     resolver: zodResolver(deviceLoginSchema),
   });
-
-  const busy = isSubmitting || login.isPending;
 
   const onSubmit = handleSubmit(async (values) => {
     if (submitInFlight.current || login.isPending) return;
@@ -140,7 +160,7 @@ export default function LoginPage() {
             {busy ? (
               <>
                 <Loader2 className="animate-spin" size={17} />
-                Submitting
+                {showColdStartHint ? 'Still working…' : 'Submitting'}
               </>
             ) : (
               <>
@@ -149,6 +169,18 @@ export default function LoginPage() {
               </>
             )}
           </button>
+
+          {/* Cold-start hint — appears after 4 s of waiting */}
+          {showColdStartHint && (
+            <div className="flex items-start gap-2.5 rounded-lg border border-amber-400/20 bg-amber-400/[.07] p-3 text-sm text-amber-200">
+              <Loader2 className="mt-0.5 shrink-0 animate-spin text-amber-300" size={15} />
+              <span>
+                <span className="font-semibold text-amber-100">Server is waking up.</span>{' '}
+                The backend runs on the free tier and may take up to 30 s on the first request.
+                Please wait — do&nbsp;not refresh.
+              </span>
+            </div>
+          )}
         </form>
       </section>
     </main>

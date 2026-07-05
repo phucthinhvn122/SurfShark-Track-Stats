@@ -61,8 +61,6 @@ export class AdminService {
   }
 
   async dashboard() {
-    // ensure expired keys are reflected before counting
-    await this.licenses.markExpired();
     const [total, active, unused, expired, banned, totalLogins, todayLogins, failedLogins] =
       await Promise.all([
         this.prisma.license.count(),

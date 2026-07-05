@@ -16,16 +16,21 @@ const NAV = [
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const [authed, setAuthed] = useState(false);
-
   const isLogin = pathname === '/admin/login';
+
+  // Read sessionStorage synchronously so the first render is already correct on
+  // the client — avoids the "Authenticating..." flash on every in-app navigation.
+  const [authed, setAuthed] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return !!sessionStorage.getItem('admin_token');
+  });
 
   useEffect(() => {
     if (isLogin) return;
     const token = sessionStorage.getItem('admin_token');
     if (!token) router.push('/admin/login');
-    else setAuthed(true);
-  }, [isLogin, router]);
+    else if (!authed) setAuthed(true); // covers SSR hydration edge case
+  }, [isLogin, authed, router]);
 
   if (isLogin) return <>{children}</>;
   if (!authed) {
