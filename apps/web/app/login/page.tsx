@@ -1,23 +1,28 @@
 // apps/web/app/login/page.tsx
 'use client';
 import { useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { AlertCircle, ArrowRight, KeyRound, Loader2, ShieldCheck } from 'lucide-react';
 import { deviceLoginSchema, type DeviceLoginInput } from '@surfshark/shared';
 import { useLogin } from '../../hooks/queries';
+import StatusView from '../../components/auth/StatusView';
 
 export default function LoginPage() {
-  const router = useRouter();
   const login = useLogin();
   const [serverError, setServerError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // When set, we render the status view inline instead of redirecting to
+  // /status/[id]. Skipping the redirect + initial GET /status round-trip
+  // cuts ~300-500ms off the perceived first paint after the worker writes
+  // the terminal status.
+  const [submittedRequestId, setSubmittedRequestId] = useState<string | null>(null);
   const submitInFlight = useRef(false);
 
   const {
     register,
     handleSubmit,
+    reset,
     formState: { errors },
   } = useForm<DeviceLoginInput>({
     resolver: zodResolver(deviceLoginSchema),
@@ -32,13 +37,31 @@ export default function LoginPage() {
     setServerError(null);
     try {
       const { requestId } = await login.mutateAsync(values);
-      router.push(`/status/${requestId}`);
+      // Switch the same page to the status view in place — no router.push,
+      // no separate /status/[id] route, no second navigation. The SSE
+      // connection from StatusView opens immediately against the just-returned
+      // requestId, so the worker's PUBLISH hits the open stream.
+      setSubmittedRequestId(requestId);
     } catch (e: unknown) {
       submitInFlight.current = false;
       setIsSubmitting(false);
       setServerError(e instanceof Error ? e.message : 'Login failed');
     }
   });
+
+  const loginAgain = () => {
+    setSubmittedRequestId(null);
+    setIsSubmitting(false);
+    setServerError(null);
+    submitInFlight.current = false;
+    reset();
+  };
+
+  // Status view replaces both columns once a request is in flight so it
+  // can use its own full-width layout.
+  if (submittedRequestId) {
+    return <StatusView requestId={submittedRequestId} skipInitialFetch onLoginAgain={loginAgain} />;
+  }
 
   return (
     <main className="mx-auto grid w-full max-w-5xl gap-6 px-4 py-8 sm:px-6 sm:py-12 lg:grid-cols-[minmax(0,1fr)_420px] lg:items-start">

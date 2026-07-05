@@ -25,8 +25,19 @@ const TERMINAL = new Set(['success', 'failed', 'expired', 'invalid_code', 'teleg
  * Step 7: poll status until terminal (success | failed | ...).
  *
  * Falls back to 1.5s polling if SSE fails — preserves reliability.
+ *
+ * `opts.skipInitialFetch` keeps the first GET /status round-trip off the
+ * critical path. The SSE server already pushes the current status on
+ * connect, so the first render after SSE fires is correct without a
+ * redundant client fetch. Saves ~100-300ms when the SSE is up. If the
+ * SSE is broken, the first poll at 1.5s still fires (a broken stream
+ * never leaves the user stuck on the loading screen — they just wait
+ * one polling tick longer than they would with the initial fetch).
  */
-export function useStatus(requestId: string | null) {
+export function useStatus(
+  requestId: string | null,
+  opts: { skipInitialFetch?: boolean } = {},
+) {
   return useQuery({
     queryKey: ['status', requestId],
     queryFn: () => api.status(requestId!),
@@ -36,6 +47,7 @@ export function useStatus(requestId: string | null) {
       return s && TERMINAL.has(s) ? false : 1500;
     },
     staleTime: 0,
+    refetchOnMount: opts.skipInitialFetch ? false : 'always',
   });
 }
 
